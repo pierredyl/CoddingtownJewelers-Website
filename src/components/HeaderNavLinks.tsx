@@ -31,14 +31,14 @@ export function HeaderNavLinks() {
               aria-current={isActive ? "page" : undefined}
               className={`relative whitespace-nowrap py-1 text-[11px] font-semibold uppercase tracking-[0.18em] transition-colors sm:text-xs ${
                 isActive
-                  ? "text-obsidian"
-                  : "text-ink-secondary hover:text-obsidian"
+                  ? "text-canvas"
+                  : "text-canvas/75 hover:text-gold-light"
               }`}
             >
               {item.label}
               <span
                 aria-hidden="true"
-                className={`absolute inset-x-0 -bottom-1 h-[1.5px] bg-gold transition-transform duration-300 origin-left ${
+                className={`absolute inset-x-0 -bottom-1 h-[1.5px] origin-left bg-gold-light transition-transform duration-300 ${
                   isActive ? "scale-x-100" : "scale-x-0"
                 }`}
               />

@@ -420,6 +420,18 @@ export function formatStoneWithBirthstone(stone: string): string {
 }
 
 export const STONE_SHAPE_OPTIONS_BY_CATEGORY: Record<string, SimpleFilterOption[]> = {
+  all: [
+    { id: "Round", label: "Round", values: ["Round", "ROUND"] },
+    { id: "Oval", label: "Oval", values: ["Oval", "OVAL", "Elongated Oval"] },
+    { id: "Pear", label: "Pear", values: ["Pear"] },
+    { id: "Emerald", label: "Emerald", values: ["Emerald", "EMERALD"] },
+    { id: "Marquise", label: "Marquise", values: ["Marquise"] },
+    { id: "Cushion", label: "Cushion", values: ["Elongated Cushion", "Cushion"] },
+    { id: "Square", label: "Square / Princess", values: ["Square"] },
+    { id: "Radiant", label: "Radiant", values: ["Radiant"] },
+    { id: "Baguette", label: "Baguette", values: ["Straight Baguette", "Tapered Baguette"] },
+    { id: "Pearl", label: "Pearl", values: ["Pearl"] },
+  ],
   "engagement-rings": [
     { id: "Round", label: "Round", values: ["Round", "ROUND"] },
     { id: "Oval", label: "Oval", values: ["Oval", "OVAL", "Elongated Oval"] },
@@ -896,4 +908,267 @@ export function getStoneShapeOptionsForCategory(
   categorySlug: string
 ): SimpleFilterOption[] {
   return STONE_SHAPE_OPTIONS_BY_CATEGORY[categorySlug] ?? [];
+}
+
+/**
+ * Canonical, consumer-friendly Metal Family filter definitions.
+ * Consolidates 30+ raw supplier alloy names (e.g. "10K X1 White Gold",
+ * "14K Palladium White Gold", "18K Yellow Gold") into clean shopper-facing
+ * filters while searching every underlying alloy variant behind the scenes.
+ */
+export interface MetalFilterOption {
+  id: string;
+  label: string;
+  swatch: string;
+  parent?: "gold";
+  orClauses: string[];
+  excludePlated?: boolean;
+  matchesRawMetal: (raw: string) => boolean;
+}
+
+const isPlatedOrFilledRaw = (raw: string) =>
+  /(gold-filled|gold-plated|plated|vermeil)/i.test(raw);
+
+export const METAL_FILTER_OPTIONS: MetalFilterOption[] = [
+  {
+    id: "gold",
+    label: "Gold",
+    swatch: "#d5b162",
+    orClauses: ["metal_type.ilike.%Gold%"],
+    excludePlated: true,
+    matchesRawMetal: (raw) =>
+      /\bgold\b/i.test(raw) && !isPlatedOrFilledRaw(raw),
+  },
+  {
+    id: "yellow-gold",
+    label: "Yellow Gold",
+    swatch: "#d5b162",
+    parent: "gold",
+    orClauses: ["metal_type.ilike.%Yellow%Gold%"],
+    excludePlated: true,
+    matchesRawMetal: (raw) =>
+      /yellow.*gold/i.test(raw) && !isPlatedOrFilledRaw(raw),
+  },
+  {
+    id: "white-gold",
+    label: "White Gold",
+    swatch: "#d6dbe2",
+    parent: "gold",
+    orClauses: ["metal_type.ilike.%White%Gold%"],
+    excludePlated: true,
+    matchesRawMetal: (raw) =>
+      /white.*gold/i.test(raw) && !isPlatedOrFilledRaw(raw),
+  },
+  {
+    id: "rose-gold",
+    label: "Rose Gold",
+    swatch: "#d99f8c",
+    parent: "gold",
+    orClauses: ["metal_type.ilike.%Rose%Gold%"],
+    excludePlated: true,
+    matchesRawMetal: (raw) =>
+      /rose.*gold/i.test(raw) && !isPlatedOrFilledRaw(raw),
+  },
+  {
+    id: "10k-gold",
+    label: "10K Gold",
+    swatch: "#d5b162",
+    parent: "gold",
+    orClauses: ["metal_type.ilike.10K%Gold%"],
+    excludePlated: true,
+    matchesRawMetal: (raw) =>
+      /^10k\b/i.test(raw) && !isPlatedOrFilledRaw(raw),
+  },
+  {
+    id: "14k-gold",
+    label: "14K Gold",
+    swatch: "#d5b162",
+    parent: "gold",
+    orClauses: ["metal_type.ilike.14K%Gold%"],
+    excludePlated: true,
+    matchesRawMetal: (raw) =>
+      /^14k\b/i.test(raw) && !isPlatedOrFilledRaw(raw),
+  },
+  {
+    id: "18k-gold",
+    label: "18K Gold",
+    swatch: "#d5b162",
+    parent: "gold",
+    orClauses: ["metal_type.ilike.18K%Gold%"],
+    excludePlated: true,
+    matchesRawMetal: (raw) =>
+      /^18k\b/i.test(raw) && !isPlatedOrFilledRaw(raw),
+  },
+  {
+    id: "platinum",
+    label: "Platinum",
+    swatch: "#dfe3e8",
+    orClauses: ["metal_type.ilike.%Platinum%"],
+    matchesRawMetal: (raw) => /platinum/i.test(raw),
+  },
+  {
+    id: "sterling-silver",
+    label: "Sterling Silver",
+    swatch: "#cbd0d8",
+    orClauses: ["metal_type.ilike.%Sterling Silver%"],
+    excludePlated: true,
+    matchesRawMetal: (raw) =>
+      /silver/i.test(raw) && !isPlatedOrFilledRaw(raw),
+  },
+  {
+    id: "two-tone",
+    label: "Two-Tone & Mixed",
+    swatch: "linear-gradient(135deg, #d8b25a 50%, #d8dde4 50%)",
+    orClauses: ["metal_type.ilike.%/%", "metal_type.ilike.%&%"],
+    matchesRawMetal: (raw) => raw.includes("/") || raw.includes("&"),
+  },
+  {
+    id: "gold-filled-vermeil",
+    label: "Gold-Filled & Vermeil",
+    swatch: "#c9a85c",
+    orClauses: [
+      "metal_type.ilike.%Filled%",
+      "metal_type.ilike.%Plated%",
+      "metal_type.ilike.%Vermeil%",
+    ],
+    matchesRawMetal: (raw) => isPlatedOrFilledRaw(raw),
+  },
+  {
+    id: "palladium",
+    label: "Palladium",
+    swatch: "#dfe3e8",
+    orClauses: ["metal_type.ilike.%Palladium%"],
+    matchesRawMetal: (raw) =>
+      /palladium/i.test(raw) && !/\bgold\b/i.test(raw),
+  },
+  {
+    id: "alternative",
+    label: "Titanium, Tungsten & Steel",
+    swatch: "#9aa1aa",
+    orClauses: [
+      "metal_type.ilike.%Titanium%",
+      "metal_type.ilike.%Tungsten%",
+      "metal_type.ilike.%Steel%",
+      "metal_type.ilike.%Cobalt%",
+    ],
+    matchesRawMetal: (raw) => /(titanium|tungsten|steel|cobalt)/i.test(raw),
+  },
+];
+
+const SPECIFIC_KARAT_TONE_REGEX = /^(10k|14k|18k)-(yellow|white|rose)-gold$/i;
+
+export function getMetalFilterLabel(id: string): string {
+  const found = METAL_FILTER_OPTIONS.find((m) => m.id === id);
+  if (found) return found.label;
+  const spec = id.match(SPECIFIC_KARAT_TONE_REGEX);
+  if (spec) {
+    const karat = spec[1].toUpperCase();
+    const tone = spec[2][0].toUpperCase() + spec[2].slice(1).toLowerCase();
+    return `${karat} ${tone} Gold`;
+  }
+  return id;
+}
+
+export function mapParsedMetalPatternToFilterId(
+  metalPattern: string
+): string | null {
+  const norm = metalPattern.trim().toLowerCase().replace(/%/g, " ").replace(/\s+/g, " ");
+  if (norm === "gold") return "gold";
+  if (norm === "yellow gold") return "yellow-gold";
+  if (norm === "white gold") return "white-gold";
+  if (norm === "rose gold") return "rose-gold";
+  if (norm === "10k" || norm === "10k gold") return "10k-gold";
+  if (norm === "14k" || norm === "14k gold") return "14k-gold";
+  if (norm === "18k" || norm === "18k gold") return "18k-gold";
+  const spec = norm.match(/^(10k|14k|18k) (yellow|white|rose) gold$/);
+  if (spec) return `${spec[1]}-${spec[2]}-gold`;
+  if (norm === "platinum") return "platinum";
+  if (norm === "sterling silver" || norm === "silver") return "sterling-silver";
+  if (norm === "palladium") return "palladium";
+  if (norm === "vermeil") return "gold-filled-vermeil";
+  if (norm === "tungsten" || norm === "titanium" || norm === "cobalt") {
+    return "alternative";
+  }
+  return null;
+}
+
+export function getMetalFilterSqlSpec(id: string): {
+  orClauses: string[];
+  excludePlated: boolean;
+} {
+  const found = METAL_FILTER_OPTIONS.find((m) => m.id === id);
+  if (found) {
+    return {
+      orClauses: found.orClauses,
+      excludePlated: Boolean(found.excludePlated),
+    };
+  }
+  const spec = id.match(SPECIFIC_KARAT_TONE_REGEX);
+  if (spec) {
+    const karat = spec[1].toUpperCase();
+    const tone = spec[2][0].toUpperCase() + spec[2].slice(1).toLowerCase();
+    return {
+      orClauses: [`metal_type.ilike.${karat}%${tone}%Gold%`],
+      excludePlated: true,
+    };
+  }
+  // Fallback for any legacy raw metal string
+  const safe = id.replace(/[,()*%]/g, " ").replace(/"/g, '\\"').trim();
+  return {
+    orClauses: [`metal_type.eq."${safe}"`],
+    excludePlated: false,
+  };
+}
+
+const KNOWN_BASE_STONE_FAMILIES = [
+  "Cubic Zirconia",
+  "Diamond",
+  "Sapphire",
+  "Emerald",
+  "Ruby",
+  "Pearl",
+  "Opal",
+  "Topaz",
+  "Amethyst",
+  "Aquamarine",
+  "Garnet",
+  "Peridot",
+  "Citrine",
+  "Tanzanite",
+  "Tourmaline",
+  "Morganite",
+  "Alexandrite",
+  "Onyx",
+  "Turquoise",
+  "Moissanite",
+  "Moonstone",
+  "Jade",
+  "Quartz",
+  "Spinel",
+  "Zircon",
+  "Lapis",
+  "Malachite",
+  "Coral",
+  "Amber",
+] as const;
+
+/**
+ * Consolidates raw supplier stone names (e.g. "Natural Diamond", "Lab-Grown Diamond",
+ * "London Blue Topaz", "Cultured White Freshwater Pearl") into clean shopper-facing
+ * gemstone family names ("Diamond", "Topaz", "Pearl").
+ */
+export function extractBaseStoneFamily(rawStone: string): string {
+  const clean = rawStone.trim();
+  const lower = clean.toLowerCase();
+  for (const family of KNOWN_BASE_STONE_FAMILIES) {
+    if (lower.includes(family.toLowerCase())) {
+      return family;
+    }
+  }
+  return clean
+    .replace(
+      /^(?:natural|lab[- ]grown|genuine|imitation|synthetic|cultured|created|simulated)\s+/i,
+      ""
+    )
+    .trim();
 }

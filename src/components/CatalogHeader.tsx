@@ -8,7 +8,7 @@ function BrandDiamondEmblem() {
       viewBox="0 0 28 28"
       fill="none"
       aria-hidden="true"
-      className="h-6 w-6 shrink-0 text-gold-deep transition-transform duration-300 group-hover:scale-105 sm:h-7 sm:w-7"
+      className="h-6 w-6 shrink-0 text-gold-light transition-transform duration-300 group-hover:scale-105 sm:h-7 sm:w-7"
     >
       <path
         d="M8.5 5.5H19.5L25 11.5L14 23.5L3 11.5L8.5 5.5Z"
@@ -29,7 +29,7 @@ function BrandDiamondEmblem() {
 
 export function CatalogHeader() {
   return (
-    <header className="sticky top-0 z-30 border-b border-obsidian/10 bg-[#faf7f1]/92 backdrop-blur-md">
+    <header className="sticky top-0 z-30 border-b border-gold/25 bg-obsidian/95 text-canvas backdrop-blur-md">
       <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-4 py-3.5 sm:flex-row sm:px-6 sm:py-4 lg:px-8">
         {/* Brand Logo (uses SITE_CONFIG.logoUrl when provided, falls back to refined diamond emblem + wordmark) */}
         <Link
@@ -46,7 +46,7 @@ export function CatalogHeader() {
           ) : (
             <>
               <BrandDiamondEmblem />
-              <span className="font-display text-xl font-bold tracking-[0.02em] text-obsidian sm:text-2xl">
+              <span className="font-display text-xl font-bold tracking-[0.02em] text-canvas sm:text-2xl">
                 {SITE_CONFIG.name}
               </span>
             </>

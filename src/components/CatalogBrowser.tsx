@@ -16,22 +16,28 @@ import {
   SETTING_STATE_OPTIONS,
   STONE_ORIGIN_OPTIONS,
   SURFACE_FINISH_OPTIONS,
+  getMetalFilterLabel,
   getStoneShapeOptionsForCategory,
   getStyleOptionsForCategory,
+  mapParsedMetalPatternToFilterId,
 } from "@/config/catalogFilters";
 import { compareSizeOrLength } from "@/lib/catalog/formatters";
-import type { CatalogItemGroup } from "@/types/catalog";
+import { parseCatalogSearchQuery } from "@/lib/search/queryParser";
+import type { CatalogItemGroup, CategorySummary } from "@/types/catalog";
 import { CatalogCard } from "./CatalogCard";
 import {
   CatalogFilterSidebar,
   STONE_NONE_VALUE,
   type CategoryFilterState,
 } from "./CatalogFilterSidebar";
+import { GlobalSearchBar } from "./GlobalSearchBar";
 import { PieceDetailModal } from "./PieceDetailModal";
 
 interface CatalogBrowserProps {
   categorySlug: string;
   categoryName: string;
+  availableCategories?: CategorySummary[];
+  initialQuery?: string;
   initialAudience?: "men" | "women" | "";
   initialStyle?: string;
   initialStone?: string;
@@ -52,10 +58,12 @@ interface CatalogBrowserProps {
 function makeInitialFilters(
   initialAudience: "men" | "women" | "",
   initialStyle = "",
-  initialStone = ""
+  initialStone = "",
+  initialQuery = ""
 ): CategoryFilterState {
   return {
-    query: "",
+    query: initialQuery,
+    categories: [],
     audiences: initialAudience ? [initialAudience] : [],
     styles: initialStyle ? [initialStyle] : [],
     chainStyles: [],
@@ -144,9 +152,125 @@ function mergeGroups(
   return Array.from(byKey.values());
 }
 
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildFiltersFromSearch(
+  rawQuery: string,
+  base: CategoryFilterState,
+  opts: {
+    categorySlug: string;
+    availableCategories: CategorySummary[];
+    metalOptions: string[];
+    stoneOptions: string[];
+    lengthOptions: string[];
+    ringSizeOptions: string[];
+  }
+): CategoryFilterState {
+  const clean = rawQuery.trim();
+  if (!clean) {
+    return { ...base, query: "" };
+  }
+
+  const parsed = parseCatalogSearchQuery(clean);
+  if (parsed.mode === "sku") {
+    return { ...base, query: parsed.skuQuery ?? clean };
+  }
+
+  const next: CategoryFilterState = { ...base, query: "" };
+  const residualParts: string[] = [];
+
+  if (opts.categorySlug === "all" && parsed.categorySlugs.length > 0) {
+    const validSlugs = new Set(opts.availableCategories.map((c) => c.slug));
+    const matchedCats = parsed.categorySlugs.filter((s) => validSlugs.has(s));
+    if (matchedCats.length > 0) {
+      next.categories = matchedCats;
+    }
+  }
+
+  if (parsed.audience) {
+    next.audiences = [parsed.audience];
+  }
+
+  if (parsed.stoneOrigin) {
+    next.stoneOrigins = [parsed.stoneOrigin];
+  }
+
+  if (parsed.metalPattern) {
+    const familyId = mapParsedMetalPatternToFilterId(parsed.metalPattern);
+    if (familyId) {
+      next.metalTypes = [familyId];
+    } else {
+      residualParts.push(parsed.metalPattern.replace(/%/g, " "));
+    }
+  }
+
+  if (parsed.stoneNone) {
+    next.primaryStones = [STONE_NONE_VALUE];
+  } else if (parsed.stonePatterns.length > 0) {
+    next.primaryStones = Array.from(new Set(parsed.stonePatterns));
+  }
+
+  if (parsed.stoneShape) {
+    next.stoneShapes = [parsed.stoneShape];
+  }
+
+  if (parsed.finish) {
+    next.finishes = [parsed.finish];
+  }
+
+  if (parsed.earringSize) {
+    next.earringSizes = [parsed.earringSize];
+  }
+
+  if (parsed.pendantChain) {
+    next.pendantChains = [parsed.pendantChain];
+  }
+
+  if (parsed.lengths.length > 0) {
+    const matchedLens = parsed.lengths
+      .map((pl) =>
+        opts.lengthOptions.find((l) => l.toLowerCase() === pl.toLowerCase())
+      )
+      .filter((v): v is string => Boolean(v));
+    if (matchedLens.length > 0) {
+      next.lengths = matchedLens;
+    } else if (parsed.length) {
+      residualParts.push(parsed.length);
+    }
+  }
+
+  if (parsed.ringSize) {
+    const matchedSize = opts.ringSizeOptions.find((r) => r === parsed.ringSize);
+    if (matchedSize) {
+      next.ringSizes = [matchedSize];
+    } else {
+      residualParts.push(`size ${parsed.ringSize}`);
+    }
+  }
+
+  if (parsed.sizable) {
+    next.sizableOnly = true;
+  }
+
+  if (parsed.initialLetter) {
+    residualParts.push(`initial ${parsed.initialLetter}`);
+  }
+
+  if (parsed.textQuery) {
+    residualParts.push(parsed.textQuery);
+  }
+
+  next.query = residualParts.join(" ").trim();
+  return next;
+}
+
 export function CatalogBrowser({
   categorySlug,
   categoryName,
+  availableCategories = [],
+  initialQuery = "",
   initialAudience = "",
   initialStyle = "",
   initialStone = "",
@@ -163,9 +287,40 @@ export function CatalogBrowser({
   initialRingSizeOptions,
   dataSource,
 }: CatalogBrowserProps) {
-  const [filters, setFilters] = useState<CategoryFilterState>(() =>
-    makeInitialFilters(initialAudience, initialStyle, initialStone)
+  const initialFilters = useMemo(
+    () =>
+      buildFiltersFromSearch(
+        initialQuery,
+        makeInitialFilters(initialAudience, initialStyle, initialStone),
+        {
+          categorySlug,
+          availableCategories,
+          metalOptions: initialMetalOptions,
+          stoneOptions: initialStoneOptions,
+          lengthOptions: initialLengthOptions,
+          ringSizeOptions: initialRingSizeOptions,
+        }
+      ),
+    [
+      initialQuery,
+      initialAudience,
+      initialStyle,
+      initialStone,
+      categorySlug,
+      availableCategories,
+      initialMetalOptions,
+      initialStoneOptions,
+      initialLengthOptions,
+      initialRingSizeOptions,
+    ]
   );
+  const initialFiltersKey = useMemo(
+    () => JSON.stringify(initialFilters),
+    [initialFilters]
+  );
+
+  const [filters, setFilters] = useState<CategoryFilterState>(initialFilters);
+  const [searchInputValue, setSearchInputValue] = useState<string>(initialQuery);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [groups, setGroups] = useState<CatalogItemGroup[]>(initialGroups);
   const [totalSkus, setTotalSkus] = useState<number>(initialTotalSkus);
@@ -192,6 +347,7 @@ export function CatalogBrowser({
   const [loadingFilter, setLoadingFilter] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [filterError, setFilterError] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
   const loadMoreControllerRef = useRef<AbortController | null>(null);
   const sessionSeedRef = useRef<number>(0);
 
@@ -199,11 +355,11 @@ export function CatalogBrowser({
   useEffect(() => {
     const seed = getSessionShuffleSeed();
     sessionSeedRef.current = seed;
-    if (!filters.query.trim()) {
+    if (!initialQuery.trim() && !filters.query.trim()) {
       setGroups(seededShuffle(initialGroups, seed));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categorySlug, initialGroups]);
+  }, [categorySlug, initialGroups, initialQuery]);
 
   // Lock body scroll & support Escape key when mobile filter drawer is open
   useEffect(() => {
@@ -238,7 +394,8 @@ export function CatalogBrowser({
   );
 
   useEffect(() => {
-    setFilters(makeInitialFilters(initialAudience, initialStyle, initialStone));
+    setFilters(initialFilters);
+    setSearchInputValue(initialQuery);
     setGroups(initialGroups);
     setTotalSkus(initialTotalSkus);
     setHasMore(initialHasMore);
@@ -252,9 +409,8 @@ export function CatalogBrowser({
     setRingSizeOptions(initialRingSizeOptions);
   }, [
     categorySlug,
-    initialAudience,
-    initialStyle,
-    initialStone,
+    initialFilters,
+    initialQuery,
     initialGroups,
     initialTotalSkus,
     initialHasMore,
@@ -268,43 +424,11 @@ export function CatalogBrowser({
     initialRingSizeOptions,
   ]);
 
-  const initialAudienceKey = initialAudience || "";
-  const currentAudienceKey =
-    filters.audiences.length === 1 ? filters.audiences[0] : "";
-  const initialStyleKey = initialStyle || "";
-  const currentStyleKey = filters.styles.length === 1 ? filters.styles[0] : "";
-  const initialStoneKey = initialStone || "";
-  const currentStoneKey =
-    filters.primaryStones.length === 1 ? filters.primaryStones[0] : "";
-
-  const hasNonInitialFilters =
-    Boolean(filters.query.trim()) ||
-    currentAudienceKey !== initialAudienceKey ||
-    currentStyleKey !== initialStyleKey ||
-    filters.styles.length > 1 ||
-    filters.chainStyles.length > 0 ||
-    filters.widths.length > 0 ||
-    filters.bandFits.length > 0 ||
-    filters.bandProfiles.length > 0 ||
-    filters.edgeDetails.length > 0 ||
-    filters.stoneShapes.length > 0 ||
-    filters.settingStates.length > 0 ||
-    filters.stoneOrigins.length > 0 ||
-    filters.caratTiers.length > 0 ||
-    filters.jewelryTypes.length > 0 ||
-    filters.finishes.length > 0 ||
-    filters.earringSizes.length > 0 ||
-    filters.pendantChains.length > 0 ||
-    filters.adjustableOnly ||
-    filters.metalTypes.length > 0 ||
-    currentStoneKey !== initialStoneKey ||
-    filters.primaryStones.length > 1 ||
-    filters.lengths.length > 0 ||
-    filters.closures.length > 0 ||
-    filters.ringSizes.length > 0 ||
-    filters.sizableOnly;
+  const filterKey = JSON.stringify(filters);
+  const hasNonInitialFilters = filterKey !== initialFiltersKey;
 
   const activeCheckboxCount =
+    filters.categories.length +
     filters.audiences.length +
     filters.styles.length +
     filters.chainStyles.length +
@@ -331,14 +455,13 @@ export function CatalogBrowser({
   const hasActiveFilters =
     Boolean(filters.query.trim()) || activeCheckboxCount > 0;
 
-  const filterKey = JSON.stringify(filters);
-
   function buildFilterQueryParams(offset: number): URLSearchParams {
     const qs = new URLSearchParams({
       slug: categorySlug,
       offset: String(offset),
     });
     if (filters.query.trim()) qs.set("q", filters.query.trim());
+    for (const cat of filters.categories) qs.append("category", cat);
     for (const aud of filters.audiences) qs.append("audience", aud);
     for (const st of filters.styles) qs.append("style", st);
     for (const cs of filters.chainStyles) qs.append("chainStyle", cs);
@@ -405,7 +528,11 @@ export function CatalogBrowser({
 
     if (!hasNonInitialFilters) {
       const seed = sessionSeedRef.current;
-      setGroups(seed > 0 ? seededShuffle(initialGroups, seed) : initialGroups);
+      setGroups(
+        !initialQuery.trim() && !filters.query.trim() && seed > 0
+          ? seededShuffle(initialGroups, seed)
+          : initialGroups
+      );
       setTotalSkus(initialTotalSkus);
       setHasMore(initialHasMore);
       setNextOffset(initialNextOffset);
@@ -457,6 +584,7 @@ export function CatalogBrowser({
     dataSource,
     categorySlug,
     filterKey,
+    retryNonce,
     hasNonInitialFilters,
     initialGroups,
     initialTotalSkus,
@@ -566,7 +694,36 @@ export function CatalogBrowser({
     }
   }
 
+  function syncUrlQuery(q: string) {
+    if (typeof window === "undefined" || categorySlug !== "all") return;
+    const url = new URL(window.location.href);
+    if (q.trim()) {
+      url.searchParams.set("q", q.trim());
+    } else {
+      url.searchParams.delete("q");
+    }
+    window.history.replaceState(null, "", url.pathname + url.search);
+  }
+
+  function handleGlobalSearchSubmit(rawQ: string) {
+    const clean = rawQ.trim();
+    setSearchInputValue(clean);
+    syncUrlQuery(clean);
+    setFilters(
+      buildFiltersFromSearch(clean, makeInitialFilters(""), {
+        categorySlug,
+        availableCategories,
+        metalOptions,
+        stoneOptions,
+        lengthOptions,
+        ringSizeOptions,
+      })
+    );
+  }
+
   function resetFilters() {
+    setSearchInputValue("");
+    syncUrlQuery("");
     setFilters(makeInitialFilters(""));
   }
 
@@ -574,6 +731,31 @@ export function CatalogBrowser({
   const activeChips = useMemo(() => {
     const chips: Array<{ id: string; label: string; onRemove: () => void }> =
       [];
+
+    if (filters.query.trim()) {
+      chips.push({
+        id: "query",
+        label: `Search: "${filters.query.trim()}"`,
+        onRemove: () => {
+          setFilters((prev) => ({ ...prev, query: "" }));
+          setSearchInputValue("");
+          syncUrlQuery("");
+        },
+      });
+    }
+
+    for (const catSlug of filters.categories) {
+      const cat = availableCategories.find((c) => c.slug === catSlug);
+      chips.push({
+        id: `cat:${catSlug}`,
+        label: cat?.name ?? catSlug,
+        onRemove: () =>
+          setFilters((prev) => ({
+            ...prev,
+            categories: prev.categories.filter((c) => c !== catSlug),
+          })),
+      });
+    }
 
     for (const styleId of filters.styles) {
       const opt = styleOptions.find((s) => s.id === styleId);
@@ -770,7 +952,7 @@ export function CatalogBrowser({
     for (const metal of filters.metalTypes) {
       chips.push({
         id: `metal:${metal}`,
-        label: metal,
+        label: getMetalFilterLabel(metal),
         onRemove: () =>
           setFilters((prev) => ({
             ...prev,
@@ -856,44 +1038,54 @@ export function CatalogBrowser({
           )}
         </button>
 
-        <search className="min-w-[220px] flex-1">
-          <form onSubmit={(e) => e.preventDefault()} className="relative">
-            <label htmlFor={searchId} className="sr-only">
-              Search {categoryName} by Item #, style, metal, or gemstone
-            </label>
-            <Search
-              className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-ink-muted"
-              aria-hidden="true"
+        {categorySlug === "all" ? (
+          <div className="min-w-[220px] flex-1">
+            <GlobalSearchBar
+              initialValue={searchInputValue}
+              isLoading={loadingFilter}
+              onSubmitQuery={handleGlobalSearchSubmit}
             />
-            <input
-              id={searchId}
-              type="search"
-              value={filters.query}
-              onChange={(e) =>
-                setFilters((prev) => ({ ...prev, query: e.target.value }))
-              }
-              placeholder="Search for anything..."
-              className="w-full rounded-control border border-hairline-strong bg-surface py-2.5 pr-9 pl-10 text-sm text-obsidian shadow-card placeholder:text-ink-muted/80 focus:border-obsidian focus:outline-none"
-            />
-            {loadingFilter ? (
-              <Loader2
-                className="absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 animate-spin text-gold-deep"
+          </div>
+        ) : (
+          <search className="min-w-[220px] flex-1">
+            <form onSubmit={(e) => e.preventDefault()} className="relative">
+              <label htmlFor={searchId} className="sr-only">
+                Search {categoryName} by Item #, style, metal, or gemstone
+              </label>
+              <Search
+                className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-ink-muted"
                 aria-hidden="true"
               />
-            ) : (
-              filters.query && (
-                <button
-                  type="button"
-                  onClick={() => setFilters((prev) => ({ ...prev, query: "" }))}
-                  aria-label="Clear search query"
-                  className="absolute top-1/2 right-2.5 -translate-y-1/2 rounded p-1 text-ink-muted hover:text-obsidian"
-                >
-                  <X className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-              )
-            )}
-          </form>
-        </search>
+              <input
+                id={searchId}
+                type="search"
+                value={filters.query}
+                onChange={(e) =>
+                  setFilters((prev) => ({ ...prev, query: e.target.value }))
+                }
+                placeholder="Search for anything..."
+                className="w-full rounded-control border border-hairline-strong bg-surface py-2.5 pr-9 pl-10 text-sm text-obsidian shadow-card placeholder:text-ink-muted/80 focus:border-obsidian focus:outline-none"
+              />
+              {loadingFilter ? (
+                <Loader2
+                  className="absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 animate-spin text-gold-deep"
+                  aria-hidden="true"
+                />
+              ) : (
+                filters.query && (
+                  <button
+                    type="button"
+                    onClick={() => setFilters((prev) => ({ ...prev, query: "" }))}
+                    aria-label="Clear search query"
+                    className="absolute top-1/2 right-2.5 -translate-y-1/2 rounded p-1 text-ink-muted hover:text-obsidian"
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                )
+              )}
+            </form>
+          </search>
+        )}
       </div>
 
       {/* Main 2-Column Layout: Sticky Left Progressive Checkbox Sidebar (Desktop) + Gallery Grid */}
@@ -906,6 +1098,7 @@ export function CatalogBrowser({
           <div className="rounded-card border border-hairline bg-surface p-5 shadow-card">
             <CatalogFilterSidebar
               categorySlug={categorySlug}
+              availableCategories={availableCategories}
               filters={filters}
               onChange={setFilters}
               onReset={resetFilters}
@@ -959,7 +1152,7 @@ export function CatalogBrowser({
                 {groups.length.toLocaleString()}
               </strong>{" "}
               {groups.length === 1 ? "piece" : "pieces"} (
-              {hasActiveFilters && hasMore
+              {(hasActiveFilters || categorySlug === "all") && hasMore
                 ? `${Math.max(0, totalSkus - 1).toLocaleString()}+`
                 : totalSkus.toLocaleString()}{" "}
               matching {totalSkus === 1 ? "option" : "options"})
@@ -979,7 +1172,7 @@ export function CatalogBrowser({
               <span>Could not update results right now. Please try again.</span>
               <button
                 type="button"
-                onClick={() => setFilters((prev) => ({ ...prev }))}
+                onClick={() => setRetryNonce((n) => n + 1)}
                 className="font-semibold underline underline-offset-2"
               >
                 Retry
@@ -1098,6 +1291,7 @@ export function CatalogBrowser({
             <div className="flex-1 overflow-y-auto px-5 py-4">
               <CatalogFilterSidebar
                 categorySlug={categorySlug}
+                availableCategories={availableCategories}
                 filters={filters}
                 onChange={setFilters}
                 onReset={resetFilters}

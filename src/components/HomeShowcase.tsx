@@ -22,12 +22,10 @@ const STORE_SERVICES = [
   {
     id: "repairs-sizing",
     title: "Repairs & Sizing",
-    summary: "Repairs, resizing, and restorations — all done right here in store.",
+    summary: "Repairs, resizing, and restorations, all done right here in store.",
     image: SITE_IMAGES.serviceRepairs,
     imageAlt:
       "18K yellow gold diamond ring held in a jeweler's bench clamp beside loose accent diamonds, setting pliers, brass loupe, and a gold chain",
-    colClass: "md:col-span-5",
-    aspectClass: "aspect-[4/3]",
   },
   {
     id: "cleaning",
@@ -36,8 +34,6 @@ const STORE_SERVICES = [
     image: SITE_IMAGES.serviceCleaning,
     imageAlt:
       "Sparkling diamond solitaire studs, pavé band, and sterling silver and gold chain on warm ivory linen",
-    colClass: "md:col-span-3 md:mt-16",
-    aspectClass: "aspect-[4/5]",
   },
   {
     id: "personalize",
@@ -47,8 +43,6 @@ const STORE_SERVICES = [
     image: SITE_IMAGES.servicePersonalize,
     imageAlt:
       "Loose royal blue sapphire, emerald, and diamond arranged beside an 18K gold ring mounting and brass calipers",
-    colClass: "md:col-span-4 md:mt-6",
-    aspectClass: "aspect-[4/3]",
   },
 ] as const;
 
@@ -108,11 +102,11 @@ export function HomeShowcase({ yelpData }: HomeShowcaseProps) {
 
         <div
           aria-hidden="true"
-          className="absolute inset-0 bg-gradient-to-r from-[#12100e]/82 via-[#12100e]/42 to-transparent"
+          className="absolute inset-0 bg-gradient-to-r from-[#12100e]/92 via-[#12100e]/52 to-[#12100e]/10"
         />
         <div
           aria-hidden="true"
-          className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-[#12100e]/55 to-transparent"
+          className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-[#12100e]/65 to-transparent"
         />
 
         <div className="relative z-10 mx-auto flex min-h-[540px] max-w-7xl flex-col justify-end px-4 py-12 sm:min-h-[620px] sm:px-6 sm:py-16 lg:min-h-[670px] lg:px-8 lg:py-20">
@@ -172,7 +166,7 @@ export function HomeShowcase({ yelpData }: HomeShowcaseProps) {
                   id="reviews-heading"
                   className="font-display text-3xl font-bold tracking-normal text-obsidian sm:text-4xl"
                 >
-                  What Our Customers Say
+                  What Our Clients Say
                 </h2>
                 {yelpData.rating !== null && yelpData.reviewCount !== null && (
                   <div className="mt-2.5 flex items-center gap-2 text-sm text-ink-secondary">
@@ -280,7 +274,7 @@ export function HomeShowcase({ yelpData }: HomeShowcaseProps) {
               <div
                 role="group"
                 aria-label="Review pages"
-                className="mt-8 flex items-center justify-center gap-2"
+                className="mt-6 flex items-center justify-center gap-1"
               >
                 {Array.from({ length: reviewPageCount }).map((_, idx) => {
                   const active = idx === reviewPage;
@@ -291,12 +285,17 @@ export function HomeShowcase({ yelpData }: HomeShowcaseProps) {
                       aria-label={`Show review set ${idx + 1}`}
                       aria-pressed={active}
                       onClick={() => setReviewPage(idx)}
-                      className={`h-2 rounded-full transition-all duration-300 ${
-                        active
-                          ? "w-7 bg-obsidian"
-                          : "w-2 bg-obsidian/25 hover:bg-obsidian/50"
-                      }`}
-                    />
+                      className="inline-flex min-h-[36px] min-w-[36px] items-center justify-center rounded-full p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-deep"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`block h-2 rounded-full transition-all duration-300 ${
+                          active
+                            ? "w-7 bg-obsidian"
+                            : "w-2 bg-obsidian/25 hover:bg-obsidian/50"
+                        }`}
+                      />
+                    </button>
                   );
                 })}
               </div>
@@ -413,7 +412,7 @@ export function HomeShowcase({ yelpData }: HomeShowcaseProps) {
                 Family-owned, serving Santa Rosa for generations.
               </h2>
               <p className="mt-5 max-w-xl text-base leading-relaxed text-ink-secondary">
-                Founded in 1976 and proudly family-owned,{" "}
+                Founded in 1974 and proudly family owned,{" "}
                 {SITE_CONFIG.name} has spent decades helping Sonoma County
                 celebrate engagements, anniversaries, and everyday milestones.
               </p>
@@ -421,7 +420,7 @@ export function HomeShowcase({ yelpData }: HomeShowcaseProps) {
               <div className="mt-8 grid max-w-sm grid-cols-2 gap-6 border-t border-obsidian/12 pt-6">
                 <div>
                   <p className="font-serif text-2xl font-semibold text-obsidian sm:text-3xl">
-                    1976
+                    1974
                   </p>
                   <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-gold-deep">
                     Founded
@@ -438,7 +437,7 @@ export function HomeShowcase({ yelpData }: HomeShowcaseProps) {
               </div>
             </motion.div>
 
-            {/* Stylish Monochrome Black-and-White Frame (Swap src to your own 1976 family/store photo anytime!) */}
+            {/* Monochrome Black-and-White Frame */}
             <motion.figure
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
@@ -450,7 +449,7 @@ export function HomeShowcase({ yelpData }: HomeShowcaseProps) {
                 <div className="relative aspect-[4/3] w-full overflow-hidden rounded-[6px]">
                   <img
                     src={SITE_IMAGES.homeHeritage}
-                    alt="Black and white archival-style photograph of a classic jeweler's bench, loupe, ring mandrel, and gold bands"
+                    alt="Black and white archival photograph of a classic jeweler's bench, loupe, ring mandrel, and gold bands"
                     loading="lazy"
                     className="h-full w-full object-cover grayscale contrast-110 transition-transform duration-700 ease-out hover:scale-[1.03]"
                   />
@@ -459,7 +458,7 @@ export function HomeShowcase({ yelpData }: HomeShowcaseProps) {
                     className="pointer-events-none absolute inset-0 bg-gradient-to-t from-obsidian/50 via-transparent to-transparent"
                   />
                   <figcaption className="absolute bottom-3 left-4 text-[10px] font-semibold uppercase tracking-[0.22em] text-canvas/85">
-                    Santa Rosa, CA &middot; Since 1976
+                    Santa Rosa, CA &middot; Since 1974
                   </figcaption>
                 </div>
               </div>

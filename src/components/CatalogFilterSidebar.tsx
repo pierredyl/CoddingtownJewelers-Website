@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, RotateCcw } from "lucide-react";
 import {
   BAND_FIT_OPTIONS,
@@ -12,21 +12,24 @@ import {
   EARRING_SIZE_TIER_OPTIONS,
   EDGE_DETAIL_OPTIONS,
   GEMSTONE_JEWELRY_TYPE_OPTIONS,
+  METAL_FILTER_OPTIONS,
   PENDANT_CHAIN_OPTIONS,
   RING_WIDTH_TIER_OPTIONS,
   SETTING_STATE_OPTIONS,
   STONE_ORIGIN_OPTIONS,
   SURFACE_FINISH_OPTIONS,
+  extractBaseStoneFamily,
   formatStoneWithBirthstone,
   getStoneShapeOptionsForCategory,
   getStyleOptionsForCategory,
 } from "@/config/catalogFilters";
-import { parseMetalPurityAndColor } from "@/lib/catalog/formatters";
+import type { CategorySummary } from "@/types/catalog";
 
 export const STONE_NONE_VALUE = "__none__";
 
 export interface CategoryFilterState {
   query: string;
+  categories: string[];
   audiences: ("men" | "women")[];
   styles: string[];
   chainStyles: string[];
@@ -53,6 +56,7 @@ export interface CategoryFilterState {
 
 interface CatalogFilterSidebarProps {
   categorySlug: string;
+  availableCategories?: CategorySummary[];
   filters: CategoryFilterState;
   onChange: (updater: (prev: CategoryFilterState) => CategoryFilterState) => void;
   onReset: () => void;
@@ -79,7 +83,15 @@ function FilterDropBox({
   nested?: boolean;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(defaultOpen || count > 0);
+  const prevCountRef = useRef(count);
+
+  useEffect(() => {
+    if (count > 0 && prevCountRef.current === 0) {
+      setOpen(true);
+    }
+    prevCountRef.current = count;
+  }, [count]);
   return (
     <div
       className={
@@ -128,6 +140,7 @@ const CHAIN_CLASP_FALLBACK = ["Lobster Clasp", "Spring Ring", "Box Clasp"];
 
 export function CatalogFilterSidebar({
   categorySlug,
+  availableCategories = [],
   filters,
   onChange,
   onReset,
@@ -152,48 +165,64 @@ export function CatalogFilterSidebar({
     [categorySlug]
   );
 
-  // Group metals by Purity (10K Gold, 14K Gold, 18K Gold, Platinum, Sterling Silver, etc.)
-  const groupedMetals = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        purity: string;
-        order: number;
-        items: { raw: string; color: string; colorOrder: number; swatch: string }[];
-      }
-    >();
-    for (const raw of metalOptions) {
-      const parsed = parseMetalPurityAndColor(raw);
-      const group = map.get(parsed.purity);
-      const item = {
-        raw: parsed.raw,
-        color: parsed.color,
-        colorOrder: parsed.colorOrder,
-        swatch: parsed.swatch,
-      };
-      if (group) {
-        group.items.push(item);
-      } else {
-        map.set(parsed.purity, {
-          purity: parsed.purity,
-          order: parsed.purityOrder,
-          items: [item],
-        });
+  // Clean, consumer-facing Metal Family filters (hides supplier alloy noise like "10K X1 White Gold")
+  const visibleTopMetals = useMemo(
+    () =>
+      METAL_FILTER_OPTIONS.filter(
+        (opt) =>
+          !opt.parent &&
+          (metalOptions.length === 0 ||
+            metalOptions.some((raw) => opt.matchesRawMetal(raw)) ||
+            filters.metalTypes.includes(opt.id) ||
+            (opt.id === "gold" &&
+              filters.metalTypes.some((m) => m.includes("gold"))))
+      ),
+    [metalOptions, filters.metalTypes]
+  );
+
+  const visibleGoldSubMetals = useMemo(
+    () =>
+      METAL_FILTER_OPTIONS.filter(
+        (opt) =>
+          opt.parent === "gold" &&
+          (metalOptions.length === 0 ||
+            metalOptions.some((raw) => opt.matchesRawMetal(raw)) ||
+            filters.metalTypes.includes(opt.id))
+      ),
+    [metalOptions, filters.metalTypes]
+  );
+
+  const selectedGoldSubCount = useMemo(
+    () =>
+      visibleGoldSubMetals.filter((m) => filters.metalTypes.includes(m.id))
+        .length,
+    [visibleGoldSubMetals, filters.metalTypes]
+  );
+
+  // Deduplicate raw supplier gemstone variants into clean base gemstone families
+  const consolidatedStoneOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const raw of stoneOptions) {
+      const base = extractBaseStoneFamily(raw);
+      if (base) set.add(base);
+    }
+    for (const active of filters.primaryStones) {
+      if (active !== STONE_NONE_VALUE) {
+        set.add(extractBaseStoneFamily(active));
       }
     }
-    return Array.from(map.values())
-      .sort((a, b) => a.order - b.order)
-      .map((g) => ({
-        ...g,
-        items: g.items.sort((a, b) =>
-          a.colorOrder !== b.colorOrder
-            ? a.colorOrder - b.colorOrder
-            : a.raw.localeCompare(b.raw)
-        ),
-      }));
-  }, [metalOptions]);
+    return Array.from(set).sort((a, b) => {
+      if (a === "Diamond") return -1;
+      if (b === "Diamond") return 1;
+      return a.localeCompare(b);
+    });
+  }, [stoneOptions, filters.primaryStones]);
 
-  // Strict category applicability rules
+  // Strict category applicability rules (works universally for single categories AND "all")
+  const isAllCategories = categorySlug === "all";
+  const selectedCats = filters.categories;
+  const hasSelectedCat = (s: string) =>
+    selectedCats.length === 0 || selectedCats.includes(s);
   const supportsAudience = categorySlug !== "gemstone-jewelry";
   const isNecklaceCategory = categorySlug === "necklaces-pendants";
   const isBraceletCategory = categorySlug === "bracelets";
@@ -204,8 +233,17 @@ export function CatalogFilterSidebar({
     isEngagementCategory ||
     isWeddingBandCategory ||
     categorySlug === "fashion-rings" ||
-    categorySlug === "gemstone-jewelry";
-  const isLengthCategory = isNecklaceCategory || isBraceletCategory;
+    categorySlug === "gemstone-jewelry" ||
+    (isAllCategories &&
+      (hasSelectedCat("engagement-rings") ||
+        hasSelectedCat("wedding-bands") ||
+        hasSelectedCat("fashion-rings") ||
+        hasSelectedCat("gemstone-jewelry")));
+  const isLengthCategory =
+    isNecklaceCategory ||
+    isBraceletCategory ||
+    (isAllCategories &&
+      (hasSelectedCat("necklaces-pendants") || hasSelectedCat("bracelets")));
 
   // Progressive disclosure triggers based on parent selections
   const selectedStandaloneChains =
@@ -262,7 +300,10 @@ export function CatalogFilterSidebar({
     stoneShapeOptions.length > 0 &&
     ((!selectedOnlyStandaloneChains &&
       !selectedOnlyPlainBand &&
-      (selectedStoneStyle || isEngagementCategory || categorySlug === "gemstone-jewelry")) ||
+      (selectedStoneStyle ||
+        isEngagementCategory ||
+        categorySlug === "gemstone-jewelry" ||
+        isAllCategories)) ||
       filters.stoneShapes.length > 0);
 
   const showClaspSubFilter =
@@ -293,9 +334,11 @@ export function CatalogFilterSidebar({
 
   const filteredStones = useMemo(() => {
     const q = stoneSearch.trim().toLowerCase();
-    if (!q) return stoneOptions;
-    return stoneOptions.filter((s) => s.toLowerCase().includes(q));
-  }, [stoneOptions, stoneSearch]);
+    if (!q) return consolidatedStoneOptions;
+    return consolidatedStoneOptions.filter((s) =>
+      formatStoneWithBirthstone(s).toLowerCase().includes(q)
+    );
+  }, [consolidatedStoneOptions, stoneSearch]);
 
   return (
     <div className="space-y-0.5">
@@ -316,6 +359,42 @@ export function CatalogFilterSidebar({
             <span>Clear All</span>
           </button>
         </div>
+      )}
+
+      {/* 0a. All-Items Entry Point: Multi-Select Category Filter */}
+      {isAllCategories && availableCategories.length > 0 && (
+        <FilterDropBox
+          title="Category"
+          count={filters.categories.length}
+          defaultOpen
+        >
+          <div className="space-y-1.5">
+            {availableCategories.map((cat) => {
+              const checked = filters.categories.includes(cat.slug);
+              return (
+                <label
+                  key={cat.slug}
+                  className="flex min-h-[30px] cursor-pointer items-center gap-2.5 py-0.5 text-sm text-ink hover:text-obsidian"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() =>
+                      onChange((prev) => ({
+                        ...prev,
+                        categories: toggleArrayItem(prev.categories, cat.slug),
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-hairline-strong accent-obsidian"
+                  />
+                  <span className={checked ? "font-medium text-obsidian" : ""}>
+                    {cat.name}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </FilterDropBox>
       )}
 
       {/* 0. Gemstone Jewelry Entry Point: Jewelry Type (Rings / Earrings / Necklaces / Bracelets) */}
@@ -410,7 +489,7 @@ export function CatalogFilterSidebar({
                       return (
                         <label
                           key={cs.id}
-                          className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                          className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                         >
                           <input
                             type="checkbox"
@@ -450,7 +529,7 @@ export function CatalogFilterSidebar({
                     return (
                       <label
                         key={tier.id}
-                        className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                        className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                       >
                         <input
                           type="checkbox"
@@ -487,7 +566,7 @@ export function CatalogFilterSidebar({
                       return (
                         <label
                           key={cls}
-                          className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                          className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                         >
                           <input
                             type="checkbox"
@@ -529,7 +608,7 @@ export function CatalogFilterSidebar({
                     return (
                       <label
                         key={w}
-                        className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                        className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                       >
                         <input
                           type="checkbox"
@@ -565,7 +644,7 @@ export function CatalogFilterSidebar({
                     return (
                       <label
                         key={fit.id}
-                        className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                        className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                       >
                         <input
                           type="checkbox"
@@ -601,7 +680,7 @@ export function CatalogFilterSidebar({
                     return (
                       <label
                         key={prof.id}
-                        className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                        className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                       >
                         <input
                           type="checkbox"
@@ -640,7 +719,7 @@ export function CatalogFilterSidebar({
                     return (
                       <label
                         key={edge.id}
-                        className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                        className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                       >
                         <input
                           type="checkbox"
@@ -679,7 +758,7 @@ export function CatalogFilterSidebar({
                     return (
                       <label
                         key={fn.id}
-                        className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                        className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                       >
                         <input
                           type="checkbox"
@@ -722,7 +801,7 @@ export function CatalogFilterSidebar({
                       return (
                         <label
                           key={pc.id}
-                          className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                          className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                         >
                           <input
                             type="checkbox"
@@ -771,7 +850,7 @@ export function CatalogFilterSidebar({
                       return (
                         <label
                           key={es.id}
-                          className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                          className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                         >
                           <input
                             type="checkbox"
@@ -818,7 +897,7 @@ export function CatalogFilterSidebar({
                       return (
                         <label
                           key={st.id}
-                          className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                          className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                         >
                           <input
                             type="checkbox"
@@ -864,7 +943,7 @@ export function CatalogFilterSidebar({
                     return (
                       <label
                         key={cls}
-                        className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                        className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                       >
                         <input
                           type="checkbox"
@@ -933,97 +1012,97 @@ export function CatalogFilterSidebar({
         </FilterDropBox>
       )}
 
-      {/* 3. Metal (Drop-box with nested Purity -> Color drop-boxes) */}
-      {groupedMetals.length > 0 && (
+      {/* 3. Metal (Clean consumer families: Gold + optional Color/Karat refine, Platinum, Sterling Silver, etc.) */}
+      {visibleTopMetals.length > 0 && (
         <FilterDropBox
           title="Metal"
           count={filters.metalTypes.length}
           defaultOpen={filters.metalTypes.length > 0}
         >
-          <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
-            {groupedMetals.map((group) => {
-              const selectedInGroup = group.items.filter((i) =>
-                filters.metalTypes.includes(i.raw)
-              ).length;
-
-              if (group.items.length === 1) {
-                const item = group.items[0];
-                const checked = filters.metalTypes.includes(item.raw);
-                return (
-                  <label
-                    key={item.raw}
-                    className="flex cursor-pointer items-center gap-2 py-1.5 text-xs text-ink hover:text-obsidian"
-                  >
+          <div className="space-y-1.5">
+            {visibleTopMetals.map((opt) => {
+              const checked = filters.metalTypes.includes(opt.id);
+              const isGold = opt.id === "gold";
+              return (
+                <div key={opt.id}>
+                  <label className="flex min-h-[30px] cursor-pointer items-center gap-2.5 py-0.5 text-sm text-ink hover:text-obsidian">
                     <input
                       type="checkbox"
                       checked={checked}
                       onChange={() =>
                         onChange((prev) => ({
                           ...prev,
-                          metalTypes: toggleArrayItem(prev.metalTypes, item.raw),
+                          metalTypes: toggleArrayItem(prev.metalTypes, opt.id),
                         }))
                       }
-                      className="h-3.5 w-3.5 rounded border-hairline-strong accent-obsidian"
+                      className="h-4 w-4 rounded border-hairline-strong accent-obsidian"
                     />
                     <span
                       aria-hidden="true"
-                      className="h-2.5 w-2.5 shrink-0 rounded-full border border-obsidian/20"
-                      style={{ background: item.swatch }}
+                      className="h-3 w-3 shrink-0 rounded-full border border-obsidian/20"
+                      style={{ background: opt.swatch }}
                     />
                     <span className={checked ? "font-medium text-obsidian" : ""}>
-                      {item.raw}
+                      {opt.label}
                     </span>
                   </label>
-                );
-              }
 
-              return (
-                <FilterDropBox
-                  key={group.purity}
-                  title={group.purity}
-                  count={selectedInGroup}
-                  defaultOpen={selectedInGroup > 0}
-                  nested
-                >
-                  <div className="space-y-1.5 pl-1">
-                    {group.items.map((item) => {
-                      const checked = filters.metalTypes.includes(item.raw);
-                      return (
-                        <label
-                          key={item.raw}
-                          className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() =>
-                              onChange((prev) => ({
-                                ...prev,
-                                metalTypes: toggleArrayItem(
-                                  prev.metalTypes,
-                                  item.raw
-                                ),
-                              }))
-                            }
-                            className="h-3.5 w-3.5 rounded border-hairline-strong accent-obsidian"
-                          />
-                          <span
-                            aria-hidden="true"
-                            className="h-2.5 w-2.5 shrink-0 rounded-full border border-obsidian/20"
-                            style={{ background: item.swatch }}
-                          />
-                          <span
-                            className={`truncate ${
-                              checked ? "font-medium text-obsidian" : ""
-                            }`}
-                          >
-                            {item.raw}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </FilterDropBox>
+                  {isGold && visibleGoldSubMetals.length > 0 && (
+                    <div className="mt-1.5 ml-2 rounded-control border border-hairline/80 bg-canvas/60 px-3 py-2">
+                      <FilterDropBox
+                        title="Gold Color & Karat"
+                        count={selectedGoldSubCount}
+                        defaultOpen={selectedGoldSubCount > 0}
+                        nested
+                      >
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {visibleGoldSubMetals.map((sub) => {
+                            const subChecked = filters.metalTypes.includes(
+                              sub.id
+                            );
+                            return (
+                              <label
+                                key={sub.id}
+                                className="flex min-h-[28px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={subChecked}
+                                  onChange={() =>
+                                    onChange((prev) => ({
+                                      ...prev,
+                                      metalTypes: toggleArrayItem(
+                                        prev.metalTypes.filter(
+                                          (m) => m !== "gold"
+                                        ),
+                                        sub.id
+                                      ),
+                                    }))
+                                  }
+                                  className="h-3.5 w-3.5 rounded border-hairline-strong accent-obsidian"
+                                />
+                                <span
+                                  aria-hidden="true"
+                                  className="h-2.5 w-2.5 shrink-0 rounded-full border border-obsidian/20"
+                                  style={{ background: sub.swatch }}
+                                />
+                                <span
+                                  className={`truncate ${
+                                    subChecked
+                                      ? "font-medium text-obsidian"
+                                      : ""
+                                  }`}
+                                >
+                                  {sub.label}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </FilterDropBox>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -1060,7 +1139,7 @@ export function CatalogFilterSidebar({
                   return (
                     <label
                       key={size}
-                      className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                      className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                     >
                       <input
                         type="checkbox"
@@ -1154,7 +1233,7 @@ export function CatalogFilterSidebar({
                 return (
                   <label
                     key={len}
-                    className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                    className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                   >
                     <input
                       type="checkbox"
@@ -1264,7 +1343,7 @@ export function CatalogFilterSidebar({
                 return (
                   <label
                     key={stone}
-                    className="flex cursor-pointer items-center gap-2 text-xs text-ink hover:text-obsidian"
+                    className="flex min-h-[30px] cursor-pointer items-center gap-2 py-0.5 text-xs text-ink hover:text-obsidian"
                   >
                     <input
                       type="checkbox"

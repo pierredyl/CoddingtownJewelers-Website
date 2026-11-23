@@ -37,8 +37,8 @@ export default function AccessibilityPage() {
               </h2>
               <p className="mt-2">
                 If you encounter any difficulty browsing our catalogue, reading
-                an Item #, or viewing options on any device, please reach out —
-                we are happy to help directly over the phone or in person at{" "}
+                an Item #, or viewing options on any device, please reach out.
+                We are happy to help directly over the phone or in person at{" "}
                 {SITE_CONFIG.address}.
               </p>
               <ul className="mt-4 space-y-2">

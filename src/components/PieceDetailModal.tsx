@@ -185,8 +185,6 @@ export function PieceDetailModal({
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [selectedSku, setSelectedSku] = useState<string>("");
   const [defaultOpenSku, setDefaultOpenSku] = useState<string>("");
-  const [hasPickedMetal, setHasPickedMetal] = useState(false);
-  const [pickedSteps, setPickedSteps] = useState<Record<string, boolean>>({});
   const [displayedImageSrc, setDisplayedImageSrc] = useState<string>("");
   const [imageLoading, setImageLoading] = useState(false);
 
@@ -220,8 +218,6 @@ export function PieceDetailModal({
     setResolvedGroup(group);
     setSelectedSku(targetSku);
     setDefaultOpenSku(targetSku);
-    setHasPickedMetal(true);
-    setPickedSteps({ __all__: true });
     displayedImageSrcRef.current = initialImg;
     setDisplayedImageSrc(initialImg);
     setImageLoading(false);
@@ -435,11 +431,6 @@ export function PieceDetailModal({
   }, [activeGroup, activeVariant]);
 
   const needsMetalChoice = totalDistinctMetals > 1;
-  const isMetalReady = !needsMetalChoice || hasPickedMetal;
-  const isStepPicked = (stepId: string) =>
-    Boolean(pickedSteps.__all__ || pickedSteps[stepId]);
-  const allStepsReady = activeSteps.every((s) => isStepPicked(s.id));
-  const isConfigured = isMetalReady && allStepsReady;
 
   function selectMetalRaw(metalRaw: string) {
     if (!activeGroup) return;
@@ -463,8 +454,6 @@ export function PieceDetailModal({
     }
 
     setSelectedSku(bestPool[0].supplierSku);
-    setHasPickedMetal(true);
-    setPickedSteps({ __all__: true });
   }
 
   function handleSelectPurity(purityGroup: PurityGroup) {
@@ -484,7 +473,6 @@ export function PieceDetailModal({
 
     if (step.id === "__variant__") {
       setSelectedSku(chosenValue);
-      setPickedSteps((prev) => ({ ...prev, __variant__: true }));
       return;
     }
 
@@ -508,14 +496,6 @@ export function PieceDetailModal({
       if (narrowed.length > 0) pool = narrowed;
     }
 
-    const nextPicked: Record<string, boolean> = {};
-    for (let i = 0; i < stepIndex; i++) {
-      if (isStepPicked(activeSteps[i].id)) {
-        nextPicked[activeSteps[i].id] = true;
-      }
-    }
-    nextPicked[step.id] = true;
-
     for (let i = stepIndex + 1; i < activeSteps.length; i++) {
       const laterStep = activeSteps[i];
       const dim = CONFIG_DIMENSIONS.find((d) => d.id === laterStep.id);
@@ -525,15 +505,11 @@ export function PieceDetailModal({
         );
         if (narrowed.length > 0) {
           pool = narrowed;
-          if (isStepPicked(laterStep.id)) {
-            nextPicked[laterStep.id] = true;
-          }
         }
       }
     }
 
     setSelectedSku(pool[0].supplierSku);
-    setPickedSteps({ __all__: true });
   }
 
   function handleBackdropPointerDown(e: React.PointerEvent<HTMLDialogElement>) {
@@ -652,33 +628,6 @@ export function PieceDetailModal({
     Boolean(activeVariant?.primaryStone) ||
     specEntries.length > 0;
 
-  const configuredSummary = activeVariant
-    ? [
-        activeVariant.metalType,
-        ...activeSteps
-          .filter((s) => s.activeValue)
-          .map((s) =>
-            s.id === "__variant__"
-              ? s.options.find((o) => o.value === s.activeValue)?.label ?? null
-              : `${s.label}: ${s.activeValue}`
-          ),
-      ]
-        .filter(Boolean)
-        .join(" • ")
-    : "";
-
-  const remainingSteps = [
-    ...(needsMetalChoice && !isMetalReady ? ["Metal"] : []),
-    ...activeSteps.filter((s) => !isStepPicked(s.id)).map((s) => s.label),
-  ];
-
-  const remainingPrompt =
-    remainingSteps.length === 0
-      ? ""
-      : remainingSteps.length === 1
-        ? `Choose ${remainingSteps[0]} for Item #`
-        : `Choose ${remainingSteps.slice(0, -1).join(", ")} & ${remainingSteps[remainingSteps.length - 1]} for Item #`;
-
   return (
     <dialog
       ref={dialogRef}
@@ -696,7 +645,7 @@ export function PieceDetailModal({
             <div className="min-w-0">
               <h2
                 id={titleId}
-                className="truncate font-serif text-2xl font-semibold tracking-tight text-obsidian sm:text-3xl"
+                className="line-clamp-2 font-serif text-2xl font-semibold tracking-tight text-obsidian sm:text-3xl"
               >
                 {activeVariant.title}
               </h2>
@@ -709,8 +658,6 @@ export function PieceDetailModal({
                     type="button"
                     onClick={() => {
                       setSelectedSku(defaultOpenSku);
-                      setHasPickedMetal(true);
-                      setPickedSteps({ __all__: true });
                       closeButtonRef.current?.focus();
                     }}
                     aria-label="Reset to original configuration"
@@ -776,7 +723,6 @@ export function PieceDetailModal({
                       >
                         {purityGroups.map((pg) => {
                           const isSelected =
-                            isMetalReady &&
                             activePurityGroup?.purity === pg.purity;
                           const pillLabel =
                             pg.metals.length === 1 &&
@@ -833,7 +779,6 @@ export function PieceDetailModal({
                           >
                             {activePurityGroup.metals.map((m) => {
                               const isSelected =
-                                isMetalReady &&
                                 ((activeVariant.metalType ?? "").trim() ||
                                   "Standard") === m.raw;
                               const hasDuplicateColor =
@@ -874,45 +819,40 @@ export function PieceDetailModal({
               )}
 
               {/* Dynamic Cascading Attribute Steps */}
-              {activeSteps.map((step, idx) => {
-                const picked = isStepPicked(step.id);
+              {activeSteps.map((step, idx) => (
+                <div key={step.id}>
+                  <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-ink-muted">
+                    {step.label}
+                  </span>
 
-                return (
-                  <div key={step.id}>
-                    <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-ink-muted">
-                      {step.label}
-                    </span>
-
-                    <div
-                      role="group"
-                      aria-label={`Select ${step.label}`}
-                      className="mt-2.5 flex max-h-44 flex-wrap gap-2 overflow-y-auto pr-1"
-                    >
-                      {step.options.map((opt) => {
-                        const isSelected =
-                          picked && step.activeValue === opt.value;
-                        return (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            aria-pressed={isSelected}
-                            onClick={() =>
-                              handleSelectStepOption(idx, opt.value)
-                            }
-                            className={`rounded-pill border px-3.5 py-2 text-xs font-medium transition-all duration-200 ${
-                              isSelected
-                                ? "border-obsidian bg-obsidian text-canvas shadow-xs"
-                                : "border-obsidian/12 bg-[#f2ede4]/75 text-obsidian hover:border-gold hover:bg-[#f2ede4]"
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        );
-                      })}
-                    </div>
+                  <div
+                    role="group"
+                    aria-label={`Select ${step.label}`}
+                    className="mt-2.5 flex max-h-44 flex-wrap gap-2 overflow-y-auto pr-1"
+                  >
+                    {step.options.map((opt) => {
+                      const isSelected = step.activeValue === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={() =>
+                            handleSelectStepOption(idx, opt.value)
+                          }
+                          className={`rounded-pill border px-3.5 py-2 text-xs font-medium transition-all duration-200 ${
+                            isSelected
+                              ? "border-obsidian bg-obsidian text-canvas shadow-xs"
+                              : "border-obsidian/12 bg-[#f2ede4]/75 text-obsidian hover:border-gold hover:bg-[#f2ede4]"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                </div>
+              ))}
 
               {/* Always-Visible Item Number Plaque */}
               <div className="pt-1" aria-live="polite" aria-atomic="true">

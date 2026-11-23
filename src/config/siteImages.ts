@@ -72,14 +72,14 @@ export const SITE_IMAGE_REGISTRY: SiteImageRecord[] = [
   {
     path: SITE_IMAGES.homeHeritage,
     status: "used",
-    slot: "Home — 1976 Family Heritage (B&W)",
+    slot: "Home — 1974 Family Heritage (B&W)",
     subject: "Archival black-and-white jeweler's bench, loupe, ring mandrel & bands",
   },
   {
     path: SITE_IMAGES.homeContact,
     status: "used",
     slot: "Home — Reach Coddingtown Jewelers Background",
-    subject: "Warm boutique jewelry display showcase interior",
+    subject: "Warm oak jewelry display case with classic forest green velvet necklace stands, ring blocks, and bracelet pads",
   },
   {
     path: SITE_IMAGES.catalogRingsBanner,

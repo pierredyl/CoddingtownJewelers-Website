@@ -19,5 +19,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ group: null }, { status: 404 });
   }
 
-  return NextResponse.json({ group });
+  return NextResponse.json(
+    { group },
+    {
+      headers: {
+        "Cache-Control":
+          "public, max-age=60, s-maxage=600, stale-while-revalidate=86400",
+      },
+    }
+  );
 }

@@ -6,9 +6,13 @@ import { smartSearchCatalog } from "@/lib/supabase/queries";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const query = (searchParams.get("q") ?? "").trim();
-  const offset = Number.parseInt(searchParams.get("offset") ?? "0", 10);
-  const limit = Number.parseInt(searchParams.get("limit") ?? "36", 10);
+  const query = (searchParams.get("q") ?? "").trim().slice(0, 120);
+  const rawOffset = Number.parseInt(searchParams.get("offset") ?? "0", 10);
+  const rawLimit = Number.parseInt(searchParams.get("limit") ?? "36", 10);
+  const safeOffset =
+    Number.isFinite(rawOffset) && rawOffset >= 0 ? Math.min(rawOffset, 20000) : 0;
+  const safeLimit =
+    Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 48) : 36;
 
   if (query.length < 2) {
     return NextResponse.json({
@@ -22,11 +26,16 @@ export async function GET(request: Request) {
   }
 
   const result = await smartSearchCatalog(query, {
-    offset: Number.isFinite(offset) && offset >= 0 ? offset : 0,
-    limit: Number.isFinite(limit) && limit > 0 ? limit : 36,
+    offset: safeOffset,
+    limit: safeLimit,
   });
   if (result !== null) {
-    return NextResponse.json(result);
+    return NextResponse.json(result, {
+      headers: {
+        "Cache-Control":
+          "public, max-age=30, s-maxage=300, stale-while-revalidate=86400",
+      },
+    });
   }
 
   if (isSupabaseConfigured()) {

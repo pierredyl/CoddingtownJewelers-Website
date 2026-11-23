@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#111111" stroke="#C69A3F" stroke-width="2" />
+  <path
+    d="M20 17H44L53 28L32 51L11 28L20 17Z"
+    fill="url(#diamondFill)"
+    stroke="#E5C470"
+    stroke-width="2.2"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M11 28H53M20 17L24.5 28L32 51L39.5 28L44 17M24.5 28L32 17L39.5 28"
+    stroke="#E5C470"
+    stroke-width="1.6"
+    stroke-linejoin="round"
+    opacity="0.85"
+  />
+  <defs>
+    <linearGradient id="diamondFill" x1="16" y1="17" x2="48" y2="51" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E5C470" stop-opacity="0.32" />
+      <stop offset="55%" stop-color="#C69A3F" stop-opacity="0.14" />
+      <stop offset="100%" stop-color="#785314" stop-opacity="0.28" />
+    </linearGradient>
+  </defs>
+</svg>

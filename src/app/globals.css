@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+/*
+ * =============================================================================
+ * Warm-Modern Luxury Design Tokens (Tailwind CSS v4 @theme)
+ * Edit these semantic tokens to re-theme the entire jewelry catalog in one place.
+ *
+ * -----------------------------------------------------------------------------
+ * PREVIOUS THEME SNAPSHOT (Muted Taupe-Gold — swap back in anytime to revert):
+ *   --color-canvas: #faf9f6;
+ *   --color-surface: #ffffff;
+ *   --color-surface-subtle: #f4f1ea;
+ *   --color-surface-elevated: #fcfbf8;
+ *   --color-gold: #9a7b4f;
+ *   --color-gold-deep: #755a33;
+ *   --color-gold-light: #c8ad7f;
+ *   --color-gold-soft: #e9decb;
+ *   --color-gold-tint: #f7f2e8;
+ *   --color-hairline: #e7e1d6;
+ *   --color-hairline-strong: #cfc6b5;
+ *   --shadow-card: 0 1px 2px rgba(17, 17, 17, 0.04), 0 8px 24px rgba(17, 17, 17, 0.04);
+ *   --shadow-card-hover: 0 4px 12px rgba(17, 17, 17, 0.06), 0 18px 40px rgba(17, 17, 17, 0.08);
+ * -----------------------------------------------------------------------------
+ * =============================================================================
+ */
+@theme {
+  /* Palette — Crisp Gallery Whites, Deep Obsidian Black, Luminous 18K Gold Accents */
+  --color-canvas: #fcfaf5;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f7f2e6;
+  --color-surface-elevated: #fffdf9;
+
+  --color-obsidian: #111111;
+  --color-obsidian-soft: #1f1d19;
+  --color-ink: #1a1918;
+  --color-ink-secondary: #4a453d;
+  --color-ink-muted: #696052;
+
+  --color-gold: #c69a3f;
+  --color-gold-deep: #785314;
+  --color-gold-light: #e5c470;
+  --color-gold-soft: #e6cf98;
+  --color-gold-tint: #fbf5e4;
+
+  --color-hairline: #ebe0c6;
+  --color-hairline-strong: #d4bc84;
+
+  --color-status-success: #2a5c45;
+  --color-status-success-bg: #edf5f0;
+  --color-status-error: #8c2d2d;
+  --color-status-error-bg: #fdf2f2;
+
+  /* Typography */
+  --font-display: "Lora", "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  --font-serif: "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* Radii */
+  --radius-card: 0.25rem;
+  --radius-control: 0.25rem;
+  --radius-pill: 9999px;
+
+  /* Elevation — crisp obsidian base with warm gold sheen on hover */
+  --shadow-card: 0 1px 2px rgba(17, 17, 17, 0.04), 0 8px 22px rgba(150, 108, 31, 0.06);
+  --shadow-card-hover: 0 4px 12px rgba(17, 17, 17, 0.06), 0 16px 36px rgba(198, 154, 63, 0.16);
+  --shadow-modal: 0 24px 64px rgba(17, 17, 17, 0.3);
+}
+
+@layer base {
+  html {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    min-height: 100dvh;
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    border-top: 3px solid var(--color-gold);
+  }
+
+  ::selection {
+    background-color: var(--color-gold-soft);
+    color: var(--color-obsidian);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-gold-deep);
+    outline-offset: 2px;
+  }
+
+  /* Balanced editorial display tracking for Lora headers */
+  .font-display {
+    letter-spacing: -0.01em;
+  }
+}
+
+/* Native <dialog> modal styling & smooth backdrop */
+body:has(dialog.catalog-dialog[open]) {
+  overflow: hidden;
+}
+
+dialog.catalog-dialog {
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--color-gold-soft);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-modal);
+  max-width: min(54rem, calc(100vw - 2rem));
+  width: 100%;
+  max-height: calc(100dvh - 2.5rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+dialog.catalog-dialog::backdrop {
+  background-color: rgba(17, 17, 17, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

@@ -20,7 +20,7 @@ export const STORE_FAQS: StoreFaqItem[] = [
     id: "repairs-sizing",
     question: "Do you offer jewelry repairs and ring sizing in store?",
     answer:
-      "Yes — ring resizing, stone setting, prong work, chain repairs, and restorations are handled right here at our store in Coddingtown Center. Bring your piece in anytime for a look.",
+      "Yes. Ring resizing, stone setting, prong work, chain repairs, and restorations are handled right here at our store in Coddingtown Center. Bring your piece in anytime for a look.",
   },
   {
     id: "complimentary-cleaning",
@@ -32,12 +32,12 @@ export const STORE_FAQS: StoreFaqItem[] = [
     id: "custom-orders",
     question: "Can I personalize a piece with a different metal, length, or stone?",
     answer:
-      "Yes. Many pieces in our catalogue can be ordered in yellow, white, or rose gold, platinum, or sterling silver, as well as different stone shapes and sizes. We can also help you special-order or customize a piece at the counter.",
+      "Yes. Many pieces in our catalogue can be ordered in yellow, white, or rose gold, platinum, or sterling silver, as well as different stone shapes and sizes. We can also help you special order or customize a piece at the counter.",
   },
   {
     id: "appointments",
     question: "Do I need an appointment to visit?",
     answer:
-      "No appointment is necessary — walk right in during regular store hours. If you would like to set aside dedicated time for an engagement ring or custom project, feel free to call ahead.",
+      "No appointment is necessary. Walk right in during regular store hours. If you would like to set aside dedicated time for an engagement ring or custom project, feel free to call ahead.",
   },
 ];

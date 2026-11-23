@@ -64,7 +64,7 @@ export function CatalogCard({
             {displayVariant.title}
           </h2>
 
-          <div className="mt-auto flex items-center justify-end pt-3 text-[11px] transition-opacity duration-200 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+          <div className="mt-auto flex items-center justify-end pt-3 text-[11px] transition-opacity duration-200 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100">
             <span className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.13em] text-gold-deep">
               <span>Personalize</span>
               <ArrowRight

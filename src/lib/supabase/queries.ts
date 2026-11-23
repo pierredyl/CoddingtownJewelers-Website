@@ -7,6 +7,7 @@ import {
   RING_WIDTH_TIER_OPTIONS,
   STONE_ORIGIN_OPTIONS,
   SURFACE_FINISH_OPTIONS,
+  getMetalFilterSqlSpec,
   getStoneShapeOptionsForCategory,
   getStyleOptionsForCategory,
 } from "@/config/catalogFilters";
@@ -45,24 +46,24 @@ interface RawJoinedCatalogRow {
   attributes: Record<string, string | number | boolean | null> | null;
   is_featured: boolean;
   suppliers:
-    | { code: string; name: string }
-    | { code: string; name: string }[]
-    | null;
+  | { code: string; name: string }
+  | { code: string; name: string }[]
+  | null;
   categories:
-    | { slug: string; name: string }
-    | { slug: string; name: string }[]
-    | null;
+  | { slug: string; name: string }
+  | { slug: string; name: string }[]
+  | null;
   catalog_images?:
-    | {
-        id: number;
-        thumbnail_url: string | null;
-        full_url: string;
-        zoom_url: string | null;
-        angle: string | null;
-        sort_order: number;
-        is_primary: boolean;
-      }[]
-    | null;
+  | {
+    id: number;
+    thumbnail_url: string | null;
+    full_url: string;
+    zoom_url: string | null;
+    angle: string | null;
+    sort_order: number;
+    is_primary: boolean;
+  }[]
+  | null;
 }
 
 export interface CategoryShowcaseSummary {
@@ -425,7 +426,7 @@ export async function getEverydayEssentialSamples(): Promise<
       return groupCatalogVariants(variants).filter((g) =>
         Boolean(
           g.defaultVariant.images[0]?.fullUrl ||
-            g.defaultVariant.images[0]?.thumbnailUrl
+          g.defaultVariant.images[0]?.thumbnailUrl
         )
       );
     })
@@ -440,12 +441,12 @@ export async function getEverydayEssentialSamples(): Promise<
       const candidate =
         round === 0
           ? (pool.find(
-              (g) =>
-                !seen.has(g.groupKey) &&
-                (g.defaultVariant.metalType ?? "")
-                  .toLowerCase()
-                  .includes("sterling silver")
-            ) ?? pool.find((g) => !seen.has(g.groupKey)))
+            (g) =>
+              !seen.has(g.groupKey) &&
+              (g.defaultVariant.metalType ?? "")
+                .toLowerCase()
+                .includes("sterling silver")
+          ) ?? pool.find((g) => !seen.has(g.groupKey)))
           : pool.find((g) => !seen.has(g.groupKey));
 
       if (candidate && picked.length < maxItems) {
@@ -574,6 +575,7 @@ export type CatalogAudience = "men" | "women";
 
 export async function getCategoryListingsPage(params: {
   categorySlug: string;
+  categorySlugs?: string[];
   offset?: number;
   batchSize?: number;
   audience?: CatalogAudience;
@@ -612,31 +614,83 @@ export async function getCategoryListingsPage(params: {
   }
 
   const slug = params.categorySlug.trim().toLowerCase();
-  const { data: catRow, error: catErr } = await supabase
-    .from("categories")
-    .select("id, slug, name")
-    .eq("slug", slug)
-    .maybeSingle();
+  const isAllCategories = slug === "all";
+  const rawSearch = params.search?.trim() ?? "";
+  const parsedSearch = rawSearch ? parseCatalogSearchQuery(rawSearch) : null;
 
-  if (catErr) return null;
-  if (!catRow) {
-    return {
-      groups: [],
-      totalSkus: 0,
-      hasMore: false,
-      nextOffset: 0,
-      metalOptions: [],
-      stoneOptions: [],
-      hasNoStoneItems: false,
-      hasSizableItems: false,
-      lengthOptions: [],
-      closureOptions: [],
-      ringSizeOptions: [],
-    };
+  const explicitCategorySlugs = Array.from(
+    new Set(
+      (params.categorySlugs ?? [])
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => Boolean(s) && s !== "all")
+    )
+  );
+  // Resolve parsed category intent up front so Postgres uses the single-category
+  // composite index `(category_id, is_featured DESC, id DESC)` instead of scanning `catalog_items_pkey`!
+  const categorySlugs =
+    explicitCategorySlugs.length > 0
+      ? explicitCategorySlugs
+      : isAllCategories &&
+        parsedSearch &&
+        !parsedSearch.skuQuery &&
+        parsedSearch.categorySlugs.length > 0
+        ? parsedSearch.categorySlugs
+        : [];
+
+  let categoryIdsToFilter: number[] | null = null;
+  if (isAllCategories) {
+    if (categorySlugs.length > 0) {
+      const { data: catRows, error: catErr } = await supabase
+        .from("categories")
+        .select("id, slug")
+        .in("slug", categorySlugs);
+      if (catErr) return null;
+      categoryIdsToFilter = (catRows ?? []).map((r) => r.id);
+      if (categoryIdsToFilter.length === 0) {
+        return {
+          groups: [],
+          totalSkus: 0,
+          hasMore: false,
+          nextOffset: 0,
+          metalOptions: [],
+          stoneOptions: [],
+          hasNoStoneItems: false,
+          hasSizableItems: false,
+          lengthOptions: [],
+          closureOptions: [],
+          ringSizeOptions: [],
+        };
+      }
+    }
+  } else {
+    const { data: catRow, error: catErr } = await supabase
+      .from("categories")
+      .select("id, slug, name")
+      .eq("slug", slug)
+      .maybeSingle();
+
+    if (catErr) return null;
+    if (!catRow) {
+      return {
+        groups: [],
+        totalSkus: 0,
+        hasMore: false,
+        nextOffset: 0,
+        metalOptions: [],
+        stoneOptions: [],
+        hasNoStoneItems: false,
+        hasSizableItems: false,
+        lengthOptions: [],
+        closureOptions: [],
+        ringSizeOptions: [],
+      };
+    }
+    categoryIdsToFilter = [catRow.id];
   }
 
   const offset = Math.max(0, params.offset ?? 0);
-  const batchSize = Math.min(Math.max(params.batchSize ?? 400, 48), 500);
+  const defaultBatch = isAllCategories ? 200 : 400;
+  const batchSize = Math.min(Math.max(params.batchSize ?? defaultBatch, 48), isAllCategories ? 240 : 500);
 
   // Normalize single & multi-select filter inputs
   const audiences = Array.from(
@@ -739,28 +793,29 @@ export async function getCategoryListingsPage(params: {
 
   const hasFilter = Boolean(
     effectiveAudience ||
-      styles.length > 0 ||
-      chainStyles.length > 0 ||
-      widths.length > 0 ||
-      bandFits.length > 0 ||
-      bandProfiles.length > 0 ||
-      edgeDetails.length > 0 ||
-      stoneShapes.length > 0 ||
-      settingStates.length > 0 ||
-      stoneOrigins.length > 0 ||
-      caratTiers.length > 0 ||
-      jewelryTypes.length > 0 ||
-      finishes.length > 0 ||
-      earringSizes.length > 0 ||
-      pendantChains.length > 0 ||
-      adjustableOnly ||
-      metalTypes.length > 0 ||
-      primaryStones.length > 0 ||
-      lengths.length > 0 ||
-      closures.length > 0 ||
-      ringSizes.length > 0 ||
-      sizableOnly ||
-      params.search?.trim()
+    categorySlugs.length > 0 ||
+    styles.length > 0 ||
+    chainStyles.length > 0 ||
+    widths.length > 0 ||
+    bandFits.length > 0 ||
+    bandProfiles.length > 0 ||
+    edgeDetails.length > 0 ||
+    stoneShapes.length > 0 ||
+    settingStates.length > 0 ||
+    stoneOrigins.length > 0 ||
+    caratTiers.length > 0 ||
+    jewelryTypes.length > 0 ||
+    finishes.length > 0 ||
+    earringSizes.length > 0 ||
+    pendantChains.length > 0 ||
+    adjustableOnly ||
+    metalTypes.length > 0 ||
+    primaryStones.length > 0 ||
+    lengths.length > 0 ||
+    closures.length > 0 ||
+    ringSizes.length > 0 ||
+    sizableOnly ||
+    params.search?.trim()
   );
 
   // Use `{ count: "exact" }` only on unfiltered B-tree category views; for filtered
@@ -783,18 +838,57 @@ export async function getCategoryListingsPage(params: {
       suppliers ( code, name ),
       categories ( slug, name )
     `,
-      hasFilter ? undefined : { count: "exact" }
+      hasFilter || isAllCategories ? undefined : { count: "exact" }
     )
-    .eq("category_id", catRow.id)
-    .eq("is_active", true)
-    .order("is_featured", { ascending: false })
-    .order("id", { ascending: false })
-    .range(offset, offset + (hasFilter ? batchSize : batchSize - 1));
+    .eq("is_active", true);
 
-  if (metalTypes.length === 1) {
-    query = query.eq("metal_type", metalTypes[0]);
-  } else if (metalTypes.length > 1) {
-    query = query.in("metal_type", metalTypes);
+  if (categoryIdsToFilter && categoryIdsToFilter.length === 1) {
+    query = query
+      .eq("category_id", categoryIdsToFilter[0])
+      .order("is_featured", { ascending: false })
+      .order("id", { ascending: false });
+  } else if (categoryIdsToFilter && categoryIdsToFilter.length > 1) {
+    query = query.in("category_id", categoryIdsToFilter);
+    if (!hasFilter) {
+      query = query.order("id", { ascending: false });
+    }
+  } else if (!hasFilter) {
+    // Unfiltered all-categories view: order by primary key `id DESC` so Postgres uses
+    // `catalog_items_pkey` in < 20ms instead of sorting all 86K+ rows.
+    // For filtered all-categories searches, omit `ORDER BY id DESC` so Postgres uses
+    // GIN/B-tree bitmap index scans instead of walking `catalog_items_pkey` backwards.
+    query = query.order("id", { ascending: false });
+  }
+
+  query = query.range(
+    offset,
+    offset + (hasFilter || isAllCategories ? batchSize : batchSize - 1)
+  );
+
+  if (metalTypes.length > 0) {
+    const specs = metalTypes.map((m) => getMetalFilterSqlSpec(m));
+    const clauses = Array.from(new Set(specs.flatMap((s) => s.orClauses)));
+    if (clauses.length === 1) {
+      const single = clauses[0];
+      if (single.startsWith("metal_type.ilike.")) {
+        query = query.ilike(
+          "metal_type",
+          single.slice("metal_type.ilike.".length)
+        );
+      } else {
+        query = query.or(single);
+      }
+    } else if (clauses.length > 1) {
+      query = query.or(clauses.join(","));
+    }
+    const wantsPlated = metalTypes.includes("gold-filled-vermeil");
+    const shouldExcludePlated =
+      !wantsPlated && specs.some((s) => s.excludePlated);
+    if (shouldExcludePlated) {
+      query = query
+        .not("metal_type", "ilike", "%Plated%")
+        .not("metal_type", "ilike", "%Filled%");
+    }
   }
 
   if (primaryStones.length > 0) {
@@ -803,13 +897,37 @@ export async function getCategoryListingsPage(params: {
     if (wantsNoStone && namedStones.length === 0) {
       query = query.is("primary_stone", null);
     } else if (!wantsNoStone && namedStones.length === 1) {
-      query = query.eq("primary_stone", namedStones[0]);
+      query = query.ilike(
+        "primary_stone",
+        `%${escapeJsonValue(namedStones[0])}%`
+      );
+      if (isAllCategories && !rawSearch) {
+        query = query.textSearch("search_vector", namedStones[0], {
+          type: "websearch",
+          config: "english",
+        });
+      }
     } else if (!wantsNoStone && namedStones.length > 1) {
-      query = query.in("primary_stone", namedStones);
+      const stoneClauses = namedStones.map(
+        (s) => `primary_stone.ilike.%${escapeJsonValue(s)}%`
+      );
+      query = query.or(stoneClauses.join(","));
+      if (isAllCategories && !rawSearch) {
+        query = query.textSearch(
+          "search_vector",
+          `(${namedStones.join(" OR ")})`,
+          {
+            type: "websearch",
+            config: "english",
+          }
+        );
+      }
     } else if (wantsNoStone && namedStones.length > 0) {
       const stoneClauses = [
         "primary_stone.is.null",
-        ...namedStones.map((s) => `primary_stone.eq."${escapeJsonValue(s)}"`),
+        ...namedStones.map(
+          (s) => `primary_stone.ilike.%${escapeJsonValue(s)}%`
+        ),
       ];
       query = query.or(stoneClauses.join(","));
     }
@@ -883,13 +1001,19 @@ export async function getCategoryListingsPage(params: {
   }
 
   // Center / primary stone shape filter (Round, Oval, Emerald, Marquise, etc.)
-  if (stoneShapes.length > 0) {
+  const effectiveStoneShapes =
+    stoneShapes.length > 0
+      ? stoneShapes
+      : parsedSearch?.stoneShape
+        ? [parsedSearch.stoneShape]
+        : [];
+  if (effectiveStoneShapes.length > 0) {
     const shapeDefs = getStoneShapeOptionsForCategory(slug);
     const expandedShapes = Array.from(
       new Set(
-        stoneShapes.flatMap((id) => {
+        effectiveStoneShapes.flatMap((id) => {
           const def = shapeDefs.find((d) => d.id === id);
-          return def ? def.values : [id];
+          return def ? def.values : [id.replace(/\b\w/g, (c) => c.toUpperCase())];
         })
       )
     );
@@ -911,9 +1035,15 @@ export async function getCategoryListingsPage(params: {
     query = query.or(clauses.join(","));
   }
 
-  // Stone origin filter (Natural vs Lab-Grown)
-  if (stoneOrigins.length > 0) {
-    const clauses = stoneOrigins.flatMap(
+  // Stone origin filter (Natural vs Lab-Grown) — also honors parsed search intent when no manual checkbox is set
+  const effectiveStoneOrigins =
+    stoneOrigins.length > 0
+      ? stoneOrigins
+      : parsedSearch?.stoneOrigin
+        ? [parsedSearch.stoneOrigin]
+        : [];
+  if (effectiveStoneOrigins.length > 0) {
+    const clauses = effectiveStoneOrigins.flatMap(
       (id) => STONE_ORIGIN_OPTIONS.find((o) => o.id === id)?.orClauses ?? []
     );
     if (clauses.length > 0) {
@@ -944,8 +1074,14 @@ export async function getCategoryListingsPage(params: {
   }
 
   // Wedding band surface finish filter (Polished, Brushed / Satin, Hammered / Textured)
-  if (finishes.length > 0) {
-    const clauses = finishes.flatMap(
+  const effectiveFinishes =
+    finishes.length > 0
+      ? finishes
+      : parsedSearch?.finish
+        ? [parsedSearch.finish]
+        : [];
+  if (effectiveFinishes.length > 0) {
+    const clauses = effectiveFinishes.flatMap(
       (id) => SURFACE_FINISH_OPTIONS.find((o) => o.id === id)?.orClauses ?? []
     );
     if (clauses.length > 0) {
@@ -954,8 +1090,14 @@ export async function getCategoryListingsPage(params: {
   }
 
   // Earring scale / diameter / drop length tier filter
-  if (earringSizes.length > 0) {
-    const clauses = earringSizes.flatMap(
+  const effectiveEarringSizes =
+    earringSizes.length > 0
+      ? earringSizes
+      : parsedSearch?.earringSize
+        ? [parsedSearch.earringSize]
+        : [];
+  if (effectiveEarringSizes.length > 0) {
+    const clauses = effectiveEarringSizes.flatMap(
       (id) =>
         EARRING_SIZE_TIER_OPTIONS.find((o) => o.id === id)?.orClauses ?? []
     );
@@ -965,8 +1107,14 @@ export async function getCategoryListingsPage(params: {
   }
 
   // Pendant chain included vs pendant only filter
-  if (pendantChains.length > 0) {
-    const clauses = pendantChains.flatMap(
+  const effectivePendantChains =
+    pendantChains.length > 0
+      ? pendantChains
+      : parsedSearch?.pendantChain
+        ? [parsedSearch.pendantChain]
+        : [];
+  if (effectivePendantChains.length > 0) {
+    const clauses = effectivePendantChains.flatMap(
       (id) => PENDANT_CHAIN_OPTIONS.find((o) => o.id === id)?.orClauses ?? []
     );
     if (clauses.length > 0) {
@@ -1022,10 +1170,24 @@ export async function getCategoryListingsPage(params: {
   }
 
   // Category-aware Men's / Women's filtering using distinct, non-overlapping size/length/style rules
-  if (effectiveAudience && slug !== "gemstone-jewelry") {
-    if (slug === "bracelets") {
+  const resolvedAudience: CatalogAudience | undefined =
+    effectiveAudience ?? (audiences.length === 0 ? (parsedSearch?.audience ?? undefined) : undefined);
+  const resolvedCategorySlugs =
+    categorySlugs.length > 0
+      ? categorySlugs
+      : isAllCategories && parsedSearch && parsedSearch.categorySlugs.length > 0
+        ? parsedSearch.categorySlugs
+        : [];
+  const audienceSlug = isAllCategories
+    ? resolvedCategorySlugs.length === 1
+      ? resolvedCategorySlugs[0]
+      : "all"
+    : slug;
+
+  if (resolvedAudience && audienceSlug !== "gemstone-jewelry") {
+    if (audienceSlug === "bracelets") {
       const audLengths =
-        effectiveAudience === "men"
+        resolvedAudience === "men"
           ? ["7 3/4 In", "8 In", "8 1/2 In", "9 In", "9 1/2 In"]
           : ["6 In", "6 1/2 In", "6 3/4 In", "7 In", "7 1/2 In", "6 1/2-7 1/2 In"];
       const clauses = audLengths.flatMap((l) => [
@@ -1034,32 +1196,42 @@ export async function getCategoryListingsPage(params: {
         `attributes.cs.{"Bracelet Length":"${l}"}`,
       ]);
       query = query.or(clauses.join(","));
-    } else if (slug === "necklaces-pendants") {
-      if (effectiveAudience === "men") {
-        query = query.or(
-          'attributes.cs.{"Length":"20 In"},attributes.cs.{"Length":"22 In"},attributes.cs.{"Length":"24 In"},attributes.cs.{"Necklace Length":"20 In"},attributes.cs.{"Necklace Length":"22 In"},attributes.cs.{"Necklace Length":"24 In"},primary_stone.is.null'
-        );
+      if (resolvedAudience === "men") {
+        query = query
+          .not("title", "ilike", "%Monogram%")
+          .not("title", "ilike", "%Script%")
+          .not("title", "ilike", "%Silhouette%");
+      }
+    } else if (audienceSlug === "necklaces-pendants") {
+      if (resolvedAudience === "men") {
+        query = query
+          .or(
+            'attributes.cs.{"Length":"20 In"},attributes.cs.{"Length":"22 In"},attributes.cs.{"Length":"24 In"},attributes.cs.{"Length":"26 In"},attributes.cs.{"Necklace Length":"20 In"},attributes.cs.{"Necklace Length":"22 In"},attributes.cs.{"Necklace Length":"24 In"},title.ilike.%Curb%,title.ilike.%Figaro%,title.ilike.%Franco%,title.ilike.%Rope%'
+          )
+          .not("title", "ilike", "%Pearl%")
+          .not("title", "ilike", "%Enamel%")
+          .not("title", "ilike", "%Youth%");
       } else {
         query = query.or(
           'attributes.cs.{"Length":"16 In"},attributes.cs.{"Length":"18 In"},attributes.cs.{"Necklace Length":"16 In"},attributes.cs.{"Necklace Length":"18 In"},attributes.cs.{"Necklace Length":"16-18 In"},primary_stone.not.is.null'
         );
       }
-    } else if (slug === "wedding-bands") {
+    } else if (audienceSlug === "wedding-bands") {
       const sizes =
-        effectiveAudience === "men"
+        resolvedAudience === "men"
           ? ["9", "9.5", "10", "10.5", "11", "11.5", "12", "12.5", "13", "14", "15"]
           : ["3.5", "4", "4.5", "5", "5.5", "6", "6.5", "7", "7.5", "8", "8.5"];
       query = query.or(
         sizes.map((s) => `attributes.cs.{"Ring Size":"${s}"}`).join(",")
       );
-    } else if (slug === "fashion-rings") {
-      if (effectiveAudience === "men") {
+    } else if (audienceSlug === "fashion-rings") {
+      if (resolvedAudience === "men") {
         const menSizes = ["9", "9.5", "10", "10.5", "11", "11.5", "12", "13", "14"];
         query = query.or(
           [
             ...menSizes.map((s) => `attributes.cs.{"Ring Size":"${s}"}`),
+            "attributes->>merchandisingPath.ilike.%> Mens%",
             "title.ilike.%Signet%",
-            "title.ilike.%Men%",
           ].join(",")
         );
       } else {
@@ -1068,8 +1240,8 @@ export async function getCategoryListingsPage(params: {
           .or(womenSizes.map((s) => `attributes.cs.{"Ring Size":"${s}"}`).join(","))
           .not("title", "ilike", "%Signet%");
       }
-    } else if (slug === "engagement-rings") {
-      if (effectiveAudience === "men") {
+    } else if (audienceSlug === "engagement-rings") {
+      if (resolvedAudience === "men") {
         const menSizes = ["9", "9.5", "10", "10.5", "11", "11.5", "12", "13", "14"];
         query = query.or(
           menSizes.map((s) => `attributes.cs.{"Ring Size":"${s}"}`).join(",")
@@ -1085,27 +1257,166 @@ export async function getCategoryListingsPage(params: {
           ].join(",")
         );
       }
-    } else if (slug === "earrings") {
-      if (effectiveAudience === "men") {
+    } else if (audienceSlug === "earrings") {
+      if (resolvedAudience === "men") {
         query = query.textSearch("search_vector", "stud OR hoop", {
           type: "websearch",
           config: "english",
         });
       }
+    } else if (audienceSlug === "all") {
+      if (resolvedAudience === "men") {
+        const menSizes = ["9", "9.5", "10", "10.5", "11", "11.5", "12", "13", "14"];
+        query = query.or(
+          [
+            ...menSizes.map((s) => `attributes.cs.{"Ring Size":"${s}"}`),
+            'attributes.cs.{"Length":"20 In"}',
+            'attributes.cs.{"Length":"22 In"}',
+            'attributes.cs.{"Length":"24 In"}',
+            'attributes.cs.{"Length":"8 In"}',
+            'attributes.cs.{"Length":"8 1/2 In"}',
+            'attributes.cs.{"Length":"9 In"}',
+            "attributes->>merchandisingPath.ilike.%> Mens%",
+            "title.ilike.%Signet%",
+          ].join(",")
+        );
+      } else {
+        const womenSizes = ["4", "4.5", "5", "5.5", "6", "6.5", "7", "7.5", "8", "8.5"];
+        query = query.or(
+          [
+            ...womenSizes.map((s) => `attributes.cs.{"Ring Size":"${s}"}`),
+            'attributes.cs.{"Length":"16 In"}',
+            'attributes.cs.{"Length":"18 In"}',
+            'attributes.cs.{"Length":"7 In"}',
+            'attributes.cs.{"Length":"7 1/2 In"}',
+            "title.ilike.%Engagement%",
+            "title.ilike.%Solitaire%",
+            "title.ilike.%Halo%",
+          ].join(",")
+        );
+      }
     }
   }
 
-  const rawSearch = params.search?.trim() ?? "";
-  if (rawSearch) {
-    const clean = rawSearch
-      .replace(/[,().*%\\]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (clean) {
-      if (clean.includes(":")) {
-        query = query.eq("supplier_sku", clean.toUpperCase());
-      } else {
-        query = query.textSearch("search_vector", clean, {
+  if (parsedSearch) {
+    const parsed = parsedSearch;
+    if (parsed.skuQuery) {
+      const cleanSku = escapeJsonValue(parsed.skuQuery);
+      query = query.ilike("supplier_sku", `${cleanSku}%`);
+    } else {
+      const ftsParts: string[] = [];
+      if (parsed.metalPattern && metalTypes.length === 0) {
+        const isExactCanonicalMetal =
+          /^(?:1[048]K (?:Yellow|White|Rose) Gold|Platinum|Sterling Silver)$/.test(
+            parsed.metalPattern
+          );
+        if (isExactCanonicalMetal) {
+          query = query.eq("metal_type", parsed.metalPattern);
+        } else {
+          const hasSpecificPrefix = /^(1[048]K|Platinum|Sterling)/i.test(
+            parsed.metalPattern
+          );
+          query = query.ilike(
+            "metal_type",
+            hasSpecificPrefix
+              ? `${parsed.metalPattern}%`
+              : `%${parsed.metalPattern}%`
+          );
+        }
+        if (parsed.excludePlated) {
+          query = query
+            .not("metal_type", "ilike", "%Plated%")
+            .not("metal_type", "ilike", "%Filled%");
+        }
+      }
+
+      if (parsed.stoneNone && primaryStones.length === 0) {
+        query = query.is("primary_stone", null);
+      } else if (parsed.stonePatterns.length === 1 && primaryStones.length === 0) {
+        query = query.ilike("primary_stone", `%${parsed.stonePatterns[0]}%`);
+        // Pre-narrow via the indexed `search_vector` GIN index so multi-category gemstone
+        // searches (e.g. "14k yellow gold emerald ring") never seq-scan 50K+ rows.
+        ftsParts.push(parsed.stonePatterns[0]);
+      } else if (parsed.stonePatterns.length > 1 && primaryStones.length === 0) {
+        const stoneOr = parsed.stonePatterns
+          .map((s) => `primary_stone.ilike.%${escapeJsonValue(s)}%`)
+          .join(",");
+        query = query.or(stoneOr);
+        ftsParts.push(`(${parsed.stonePatterns.join(" OR ")})`);
+      }
+
+      // Prevent `gemstone-jewelry` bracelets/earrings from leaking into gemstone ring searches
+      if (
+        parsed.pieceType === "rings" &&
+        categorySlugs.includes("gemstone-jewelry")
+      ) {
+        query = query.or("title.ilike.%Ring%,title.ilike.%Band%");
+      }
+
+      if (parsed.excludePendants) {
+        query = query.not("title", "ilike", "%Pendant%");
+      }
+
+      if (parsed.closurePattern && closures.length === 0) {
+        const val = escapeJsonValue(parsed.closurePattern);
+        query = query.or(
+          `attributes->>Closure.ilike.%${val}%,attributes->>Clasp Type.ilike.%${val}%,title.ilike.%${val}%`
+        );
+      }
+
+      if (parsed.widthTier && widths.length === 0) {
+        const isChainLike =
+          categorySlugs.includes("necklaces-pendants") ||
+          categorySlugs.includes("bracelets");
+        const tierList = isChainLike
+          ? CHAIN_WIDTH_TIER_OPTIONS
+          : RING_WIDTH_TIER_OPTIONS;
+        const targetTier =
+          parsed.widthTier === "wide"
+            ? tierList[tierList.length - 1]
+            : tierList[0];
+        if (targetTier) {
+          const wClauses = targetTier.exactValues.map(
+            (w) => `attributes.cs.{"Width":"${escapeJsonValue(w)}"}`
+          );
+          if (wClauses.length > 0) {
+            query = query.or(wClauses.join(","));
+          }
+        }
+      }
+
+      if (parsed.sizable && !sizableOnly) {
+        query = query.contains("attributes", { Sizable: "Yes" });
+      }
+      if (parsed.initialLetter) {
+        const label = `Initial ${parsed.initialLetter.toUpperCase()}`;
+        query = query.or(
+          `attributes.cs.{"Design":"${label}"},attributes.cs.{"Design Detail":"${label}"}`
+        );
+      }
+      if (parsed.lengths.length > 0 && lengths.length === 0) {
+        const lenClauses = parsed.lengths.flatMap((len) => {
+          const val = escapeJsonValue(len);
+          return [
+            `attributes.cs.{"Length":"${val}"}`,
+            `attributes.cs.{"Bracelet Length":"${val}"}`,
+            `attributes.cs.{"Bracelet Size":"${val}"}`,
+            `attributes.cs.{"Necklace Length":"${val}"}`,
+            `attributes.cs.{"Chain Length":"${val}"}`,
+          ];
+        });
+        query = query.or(lenClauses.join(","));
+      }
+      if (parsed.ringSize && ringSizes.length === 0) {
+        query = query.contains("attributes", { "Ring Size": parsed.ringSize });
+      }
+
+      if (parsed.textQuery.trim()) {
+        ftsParts.push(parsed.textQuery.trim());
+      }
+      const combinedFts = ftsParts.join(" ").trim();
+      if (combinedFts) {
+        query = query.textSearch("search_vector", combinedFts, {
           type: "websearch",
           config: "english",
         });
@@ -1115,11 +1426,15 @@ export async function getCategoryListingsPage(params: {
 
   const { data, error, count } = await query;
   if (error || !data) {
+    if (error) {
+      console.error("[getCategoryListingsPage]", slug, error.code, error.message);
+    }
     return null;
   }
 
   const rawRows = data as unknown as RawJoinedCatalogRow[];
-  const fetchedExtraRow = hasFilter && rawRows.length > batchSize;
+  const usesLookahead = hasFilter || isAllCategories;
+  const fetchedExtraRow = usesLookahead && rawRows.length > batchSize;
   const rows = fetchedExtraRow ? rawRows.slice(0, batchSize) : rawRows;
 
   // Extract category-specific filter options from this batch before stripping heavy attributes for card payloads
@@ -1192,11 +1507,11 @@ export async function getCategoryListingsPage(params: {
     ? unsortedGroups
     : merchandiseCatalogGroups(unsortedGroups);
 
-  const totalSkus = hasFilter
+  const totalSkus = usesLookahead
     ? offset + rows.length + (fetchedExtraRow ? 1 : 0)
     : (count ?? rows.length);
   const nextOffset = offset + rows.length;
-  const hasMore = hasFilter
+  const hasMore = usesLookahead
     ? fetchedExtraRow
     : nextOffset < totalSkus && rows.length === batchSize;
 
@@ -1629,11 +1944,11 @@ export async function searchCatalogListings(
   const [skuRes, ftsRes] = await Promise.all([
     isLikelyExactSku
       ? supabase
-          .from("catalog_items")
-          .select(selectCols)
-          .eq("is_active", true)
-          .eq("supplier_sku", clean.toUpperCase())
-          .limit(20)
+        .from("catalog_items")
+        .select(selectCols)
+        .eq("is_active", true)
+        .eq("supplier_sku", clean.toUpperCase())
+        .limit(20)
       : Promise.resolve({ data: [], error: null }),
     supabase
       .from("catalog_items")

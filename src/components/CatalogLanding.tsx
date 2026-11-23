@@ -8,6 +8,7 @@ import {
   CATALOG_SHOWCASE_SECTIONS,
   type ShowcaseSectionConfig,
 } from "@/config/catalogShowcase";
+import { GlobalSearchBar } from "./GlobalSearchBar";
 
 interface CatalogLandingProps {
   skuImageMap: Record<string, string>;
@@ -245,12 +246,12 @@ function EditorialCategorySection({
                 <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
               </Link>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => scrollCarousel("prev")}
                   aria-label={`Scroll ${section.title} styles left`}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-obsidian/20 bg-[#f6f1e7] text-obsidian transition-colors hover:border-gold hover:text-gold-deep"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-obsidian/20 bg-[#f6f1e7] text-obsidian transition-colors hover:border-gold hover:text-gold-deep"
                 >
                   <ChevronLeft className="h-4 w-4" aria-hidden="true" />
                 </button>
@@ -258,7 +259,7 @@ function EditorialCategorySection({
                   type="button"
                   onClick={() => scrollCarousel("next")}
                   aria-label={`Scroll ${section.title} styles right`}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-obsidian/20 bg-[#f6f1e7] text-obsidian transition-colors hover:border-gold hover:text-gold-deep"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-obsidian/20 bg-[#f6f1e7] text-obsidian transition-colors hover:border-gold hover:text-gold-deep"
                 >
                   <ChevronRight className="h-4 w-4" aria-hidden="true" />
                 </button>
@@ -332,6 +333,26 @@ export function CatalogLanding({
   return (
     <div id="catalogue" className="w-full bg-[#f2ede4]">
       <h1 className="sr-only">Fine Jewelry Catalogue</h1>
+
+      {/* Compact Top Global Search & View All Items Bar */}
+      <section
+        aria-label="Search entire catalogue"
+        className="border-b border-obsidian/10 bg-[#faf7f1]"
+      >
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+          <div className="w-full sm:max-w-xl">
+            <GlobalSearchBar />
+          </div>
+
+          <Link
+            href="/catalogue/all"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-pill border border-obsidian/20 bg-[#f2ede4] px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.14em] text-obsidian transition-colors hover:border-obsidian hover:bg-obsidian hover:text-canvas"
+          >
+            <span>View All Items</span>
+            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </Link>
+        </div>
+      </section>
 
       <div className="w-full">
         {CATALOG_SHOWCASE_SECTIONS.map((section, idx) => (

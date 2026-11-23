@@ -39,6 +39,7 @@ export async function POST(request: Request) {
   }
 
   revalidateTag(CATALOG_CACHE_TAG);
+  revalidatePath("/");
   revalidatePath("/catalogue");
   revalidatePath("/catalogue/[slug]", "page");
 

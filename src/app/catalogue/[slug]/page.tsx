@@ -169,6 +169,12 @@ export default async function CategoryPage({
             aria-label="Jewelry categories"
             className="mt-4 flex flex-nowrap items-center gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"
           >
+            <Link
+              href="/catalogue/all"
+              className="shrink-0 rounded-pill border border-hairline-strong bg-surface px-3.5 py-1.5 text-xs font-medium text-ink-secondary transition-colors hover:border-obsidian hover:text-obsidian"
+            >
+              All Items
+            </Link>
             {categories.map((cat) => {
               const isCurrent = cat.slug === activeCategory.slug;
               return (

@@ -1,7 +1,9 @@
 export const SITE_CONFIG = {
   name: process.env.NEXT_PUBLIC_STORE_NAME || "Coddingtown Jewelers",
   /** Store logo path (overridable via NEXT_PUBLIC_STORE_LOGO). */
-  logoUrl: process.env.NEXT_PUBLIC_STORE_LOGO || "/images/logo-artisanal-script.png",
+  logoUrl:
+    process.env.NEXT_PUBLIC_STORE_LOGO ||
+    "/images/logo-artisanal-script-light.png",
   phone: process.env.NEXT_PUBLIC_STORE_PHONE || "+1 707 546 4884",
   email:
     process.env.NEXT_PUBLIC_STORE_EMAIL || "hello@coddingtownjewelers.com",
@@ -16,10 +18,10 @@ export const SITE_CONFIG = {
   metadata: {
     title: process.env.NEXT_PUBLIC_STORE_NAME || "Coddingtown Jewelers",
     description:
-      "Coddingtown Jewelers in Santa Rosa, CA — browse our jewelry catalogue by category, note any Item #, and call or visit us in Coddingtown Center.",
+      "Coddingtown Jewelers in Santa Rosa, CA. Browse our jewelry catalogue by category, note any Item #, and call or visit us in Coddingtown Center.",
   },
   footerNote:
-    "Catalogue reference only. Pricing & availability confirmed by Item # — call or visit us.",
+    "Catalogue reference only. Pricing and availability confirmed by Item #. Call or visit us.",
 } as const;
 
 export function getPhoneHref(phone: string = SITE_CONFIG.phone): string {

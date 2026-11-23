@@ -12,7 +12,7 @@ function getMultiParam(searchParams: URLSearchParams, key: string): string[] {
         .map((v) => v.trim())
         .filter(Boolean)
     )
-  );
+  ).slice(0, 15);
 }
 
 export async function GET(request: Request) {
@@ -23,6 +23,7 @@ export async function GET(request: Request) {
   }
 
   const offset = Number.parseInt(searchParams.get("offset") ?? "0", 10);
+  const categorySlugs = getMultiParam(searchParams, "category");
   const audiences = getMultiParam(searchParams, "audience")
     .map((a) => a.toLowerCase())
     .filter((a): a is CatalogAudience => a === "men" || a === "women");
@@ -51,11 +52,15 @@ export async function GET(request: Request) {
   const sizableOnly =
     searchParams.get("sizable") === "1" ||
     searchParams.get("sizable") === "true";
-  const search = searchParams.get("q") ?? undefined;
+  const rawSearch = (searchParams.get("q") ?? "").trim().slice(0, 120);
+  const search = rawSearch || undefined;
+  const safeOffset =
+    Number.isFinite(offset) && offset >= 0 ? Math.min(offset, 100000) : 0;
 
   const page = await getCategoryListingsPage({
     categorySlug: slug,
-    offset: Number.isFinite(offset) && offset >= 0 ? offset : 0,
+    categorySlugs,
+    offset: safeOffset,
     batchSize: 400,
     audiences,
     styles,
@@ -89,5 +94,10 @@ export async function GET(request: Request) {
     );
   }
 
-  return NextResponse.json(page);
+  return NextResponse.json(page, {
+    headers: {
+      "Cache-Control":
+        "public, max-age=30, s-maxage=120, stale-while-revalidate=86400",
+    },
+  });
 }

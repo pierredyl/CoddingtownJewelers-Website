@@ -137,10 +137,11 @@ function toggleArrayItem<T>(arr: T[], item: T): T[] {
 }
 
 const CHAIN_CLASP_FALLBACK = ["Lobster Clasp", "Spring Ring", "Box Clasp"];
+const EMPTY_CATEGORIES: CategorySummary[] = [];
 
 export function CatalogFilterSidebar({
   categorySlug,
-  availableCategories = [],
+  availableCategories = EMPTY_CATEGORIES,
   filters,
   onChange,
   onReset,

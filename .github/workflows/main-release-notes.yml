@@ -1,0 +1,79 @@
+name: Main Release Patch Notes
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release-notes:
+    name: Publish Main Release Notes & Update CHANGELOG
+    # Never re-trigger on our own automated CHANGELOG commit
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Generate main release highlights & update CHANGELOG.md
+        id: notes
+        run: |
+          BASE_SHA="${{ github.event.before }}"
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            BASE_SHA="HEAD~1"
+          fi
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          DATE_STR="$(date -u +%Y.%m.%d)"
+          TAG="v${DATE_STR}-${SHORT_SHA}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+          node scripts/generate-patch-notes.mjs \
+            --mode=release \
+            --base="${BASE_SHA}" \
+            --head="HEAD" \
+            --version="${TAG}" \
+            --update-changelog \
+            --out="/tmp/release-notes.md"
+
+          cat /tmp/release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit updated CHANGELOG.md
+        run: |
+          if git diff --quiet CHANGELOG.md; then
+            echo "No CHANGELOG changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "docs: update CHANGELOG for ${{ steps.notes.outputs.tag }} [skip ci]"
+          git push origin main
+
+      - name: Create GitHub Release with main highlights
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("node:fs");
+            const body = fs.readFileSync("/tmp/release-notes.md", "utf8");
+            const tag = "${{ steps.notes.outputs.tag }}";
+            const { owner, repo } = context.repo;
+
+            await github.rest.repos.createRelease({
+              owner,
+              repo,
+              tag_name: tag,
+              name: `Release ${tag}`,
+              body,
+              draft: false,
+              prerelease: false,
+            });

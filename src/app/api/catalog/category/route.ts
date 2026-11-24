@@ -57,35 +57,44 @@ export async function GET(request: Request) {
   const safeOffset =
     Number.isFinite(offset) && offset >= 0 ? Math.min(offset, 100000) : 0;
 
-  const page = await getCategoryListingsPage({
-    categorySlug: slug,
-    categorySlugs,
-    offset: safeOffset,
-    batchSize: 400,
-    audiences,
-    styles,
-    chainStyles,
-    widths,
-    bandFits,
-    bandProfiles,
-    edgeDetails,
-    stoneShapes,
-    settingStates,
-    stoneOrigins,
-    caratTiers,
-    jewelryTypes,
-    finishes,
-    earringSizes,
-    pendantChains,
-    adjustableOnly,
-    metalTypes,
-    primaryStones,
-    lengths,
-    closures,
-    ringSizes,
-    sizableOnly,
-    search,
-  });
+  let page = null;
+  try {
+    page = await getCategoryListingsPage({
+      categorySlug: slug,
+      categorySlugs,
+      offset: safeOffset,
+      batchSize: 400,
+      audiences,
+      styles,
+      chainStyles,
+      widths,
+      bandFits,
+      bandProfiles,
+      edgeDetails,
+      stoneShapes,
+      settingStates,
+      stoneOrigins,
+      caratTiers,
+      jewelryTypes,
+      finishes,
+      earringSizes,
+      pendantChains,
+      adjustableOnly,
+      metalTypes,
+      primaryStones,
+      lengths,
+      closures,
+      ringSizes,
+      sizableOnly,
+      search,
+    });
+  } catch (err) {
+    console.error("[GET /api/catalog/category] unexpected error:", err);
+    return NextResponse.json(
+      { error: "Unable to load category listings" },
+      { status: 503 }
+    );
+  }
 
   if (!page) {
     return NextResponse.json(

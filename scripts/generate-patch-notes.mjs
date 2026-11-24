@@ -18,6 +18,12 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import {
+  analyzeDiffDeterministically,
+  classifyArea,
+  maybeEnhanceWithGemini,
+  parseStructuredCommitBody,
+} from "./lib/diff-analyzer.mjs";
 
 function parseArgs(argv) {
   const opts = {
@@ -72,54 +78,6 @@ function resolveRange(baseArg, headArg) {
   return { base: null, head };
 }
 
-function classifyArea(filePath) {
-  const p = filePath.replace(/\\/g, "/");
-  if (
-    p.includes("src/lib/search/") ||
-    p.includes("GlobalSearchBar") ||
-    p.includes("api/catalog/search")
-  ) {
-    return "Search & Discovery";
-  }
-  if (
-    p.includes("CatalogBrowser") ||
-    p.includes("CatalogFilterSidebar") ||
-    p.includes("CatalogCard") ||
-    p.includes("PieceDetailModal") ||
-    p.includes("catalogFilters") ||
-    p.includes("src/app/catalogue/") ||
-    p.includes("src/app/api/catalog/")
-  ) {
-    return "Catalogue & Filters";
-  }
-  if (
-    p.includes("HomeShowcase") ||
-    p.includes("CatalogLanding") ||
-    p.includes("JewelryGuide") ||
-    p.includes("SiteHeader") ||
-    p.includes("SiteFooter") ||
-    p.includes("globals.css") ||
-    p.includes("public/images/") ||
-    p.includes("src/config/siteImages") ||
-    p.includes("src/config/reviews") ||
-    p.includes("src/config/faq")
-  ) {
-    return "Storefront Design, Copy & Media";
-  }
-  if (
-    p.includes("supabase/") ||
-    p.includes("src/lib/supabase/") ||
-    p.includes("src/lib/suppliers/") ||
-    p.includes("scripts/sync-")
-  ) {
-    return "Database & Supplier Sync";
-  }
-  if (p.includes(".github/") || p.includes("scripts/") || p === "package.json") {
-    return "Automation & Tooling";
-  }
-  return "Core & Configuration";
-}
-
 function classifyCommitKind(subject) {
   const s = subject.toLowerCase();
   if (/^(fix|bug|hotfix|patch)\b|\b(fix|fixed|bug|timeout|broken|wipe|loop)\b/.test(s)) {
@@ -140,20 +98,24 @@ function classifyCommitKind(subject) {
 function getCommits(base, head) {
   const range = base ? `${base}..${head}` : head;
   const raw = runGit(
-    `log ${range} --no-merges --pretty=format:"%H%x1f%h%x1f%ad%x1f%an%x1f%s" --date=short`
+    `log ${range} --no-merges --pretty=format:"%H%x1f%h%x1f%ad%x1f%an%x1f%s%x1f%b%x1e" --date=short`
   );
   if (!raw) return [];
   return raw
-    .split(/\r?\n/)
+    .split("\x1e")
+    .map((chunk) => chunk.trim())
     .filter(Boolean)
-    .map((line) => {
-      const [hash, shortHash, date, author, subject] = line.split("\x1f");
+    .map((chunk) => {
+      const [hash, shortHash, date, author, subject, body = ""] =
+        chunk.split("\x1f");
       return {
         hash,
         shortHash,
         date,
         author,
         subject: subject?.trim() || "(no message)",
+        body: body.trim(),
+        structured: parseStructuredCommitBody(body),
         kind: classifyCommitKind(subject || ""),
       };
     });
@@ -381,14 +343,61 @@ function formatAreaBreakdown(files, statusMap = new Map(), symbolMap = new Map()
     .join("\n\n");
 }
 
-function renderMarkdown(opts, range, commits, diffStats, statusMap, symbolMap) {
+async function buildNarrativeSections(range, commits, allFiles) {
+  const rawDiff = range.base
+    ? runGit(`diff -U0 ${range.base}...${range.head} -- "src/" "scripts/" "supabase/" ".github/"`)
+    : "";
+  const det = analyzeDiffDeterministically(allFiles, rawDiff);
+
+  // Aggregate any structured Why / Fixed / Accomplished bullets already recorded in dev commits
+  const whySet = new Set();
+  const fixedSet = new Set();
+  const accomplishedSet = new Set();
+
+  for (const c of commits) {
+    for (const w of c.structured?.why ?? []) whySet.add(w);
+    for (const f of c.structured?.fixed ?? []) fixedSet.add(f);
+    for (const a of c.structured?.accomplished ?? []) accomplishedSet.add(a);
+  }
+  for (const w of det.why) whySet.add(w);
+  for (const f of det.fixed) fixedSet.add(f);
+  for (const a of det.accomplished) accomplishedSet.add(a);
+
+  const fallback = {
+    subject: "",
+    why: Array.from(whySet).slice(0, 6),
+    fixed: Array.from(fixedSet).slice(0, 8),
+    accomplished: Array.from(accomplishedSet).slice(0, 8),
+  };
+
+  const contextSummary = [
+    `Commits (${commits.length}):`,
+    ...commits.map((c) => `- ${c.shortHash} ${c.subject}`),
+    "",
+    `Files (${allFiles.length}):`,
+    ...allFiles.slice(0, 30).map((f) => `- ${f.file} (+${f.added}/-${f.removed})`),
+    "",
+    "Diff excerpt:",
+    rawDiff.slice(0, 8000),
+  ].join("\n");
+
+  return maybeEnhanceWithGemini(contextSummary, fallback);
+}
+
+function renderMarkdown(opts, range, commits, diffStats, statusMap, symbolMap, narrative) {
   const today = opts.version || new Date().toISOString().slice(0, 10);
   const allFiles =
     opts.mode === "diff"
       ? [...diffStats.working, ...diffStats.committed]
       : diffStats.committed;
   const totals = summarizeTotals(allFiles);
-  const highlights = buildImportantHighlights(commits, allFiles);
+
+  const whyBullets = narrative.why.map((w) => `- ${w}`);
+  const fixedBullets =
+    narrative.fixed.length > 0
+      ? narrative.fixed.map((f) => `- ${f}`)
+      : ["- No bug fixes in this update (feature/maintenance release)."];
+  const accomplishedBullets = narrative.accomplished.map((a) => `- ${a}`);
 
   if (opts.mode === "release") {
     return [
@@ -396,8 +405,14 @@ function renderMarkdown(opts, range, commits, diffStats, statusMap, symbolMap) {
       "",
       `> **Summary:** ${commits.length} ${commits.length === 1 ? "commit" : "commits"} merged into \`main\` across **${totals.fileCount} ${totals.fileCount === 1 ? "file" : "files"}** (+${totals.added} / -${totals.removed}).`,
       "",
-      "### Main Changes (Highlights)",
-      ...highlights,
+      "### Why These Changes Were Made",
+      ...whyBullets,
+      "",
+      "### What Was Fixed",
+      ...fixedBullets,
+      "",
+      "### What Was Accomplished",
+      ...accomplishedBullets,
       "",
       "### Detailed Changes by Area",
       formatAreaBreakdown(allFiles, statusMap, symbolMap),
@@ -419,8 +434,14 @@ function renderMarkdown(opts, range, commits, diffStats, statusMap, symbolMap) {
       "",
       `**Stats:** ${commits.length} ${commits.length === 1 ? "commit" : "commits"} · **${totals.fileCount} files changed** (+${totals.added} / -${totals.removed})`,
       "",
-      "### Key Highlights",
-      ...highlights,
+      "### Why These Changes Were Made",
+      ...whyBullets,
+      "",
+      "### What Was Fixed",
+      ...fixedBullets,
+      "",
+      "### What Was Accomplished",
+      ...accomplishedBullets,
       "",
       "### Detailed Changes by Area",
       formatAreaBreakdown(allFiles, statusMap, symbolMap),
@@ -440,6 +461,16 @@ function renderMarkdown(opts, range, commits, diffStats, statusMap, symbolMap) {
     `- **Base comparison:** \`${range.base ?? "none"}\` → \`${range.head}\``,
     `- **Uncommitted changes:** ${workingTotals.fileCount} files (+${workingTotals.added} / -${workingTotals.removed})`,
     `- **Commits ahead of base:** ${commits.length}`,
+    "",
+    "## Why / Fixed / Accomplished",
+    "**Why:**",
+    ...whyBullets,
+    "",
+    "**What Was Fixed:**",
+    ...fixedBullets,
+    "",
+    "**What Was Accomplished:**",
+    ...accomplishedBullets,
     "",
     "## Uncommitted Changes by Area",
     formatAreaBreakdown(diffStats.working, statusMap, symbolMap),
@@ -468,14 +499,27 @@ function updateChangelogFile(entryMarkdown) {
   fs.writeFileSync(changelogPath, `${header}${entryMarkdown}`, "utf8");
 }
 
-function main() {
+async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const range = resolveRange(opts.base, opts.head);
   const commits = getCommits(range.base, range.head);
   const diffStats = getDiffStats(range.base, range.head, opts.mode === "diff");
   const statusMap = getFileStatuses(range.base, range.head);
   const symbolMap = extractDiffSymbolsByFile(range.base, range.head);
-  const md = renderMarkdown(opts, range, commits, diffStats, statusMap, symbolMap);
+  const allFiles =
+    opts.mode === "diff"
+      ? [...diffStats.working, ...diffStats.committed]
+      : diffStats.committed;
+  const narrative = await buildNarrativeSections(range, commits, allFiles);
+  const md = renderMarkdown(
+    opts,
+    range,
+    commits,
+    diffStats,
+    statusMap,
+    symbolMap,
+    narrative
+  );
 
   if (opts.out) {
     fs.writeFileSync(opts.out, md, "utf8");
@@ -486,4 +530,7 @@ function main() {
   process.stdout.write(md);
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

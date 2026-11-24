@@ -27,6 +27,8 @@ jobs:
           node-version: "22"
 
       - name: Generate PR patch notes
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           node scripts/generate-patch-notes.mjs \
             --mode=pr \

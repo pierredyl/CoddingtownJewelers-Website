@@ -179,6 +179,59 @@ function parseNumstat(raw) {
   return files;
 }
 
+function getFileStatuses(base, head) {
+  if (!base) return new Map();
+  const raw = runGit(`diff --name-status ${base}...${head}`);
+  const map = new Map();
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const parts = line.split("\t");
+    const status = parts[0]?.[0] || "M";
+    const file = parts[parts.length - 1];
+    const label =
+      status === "A"
+        ? "Added"
+        : status === "D"
+          ? "Removed"
+          : status === "R"
+            ? "Renamed"
+            : "Updated";
+    map.set(file, label);
+  }
+  return map;
+}
+
+/**
+ * Extracts newly added or modified exported functions/components/constants/migrations
+ * directly from the git diff so patch notes stay thorough even with brief commit titles.
+ */
+function extractDiffSymbolsByFile(base, head) {
+  if (!base) return new Map();
+  const raw = runGit(`diff -U0 ${base}...${head} -- "src/" "scripts/" "supabase/" ".github/"`);
+  if (!raw) return new Map();
+
+  const map = new Map();
+  let currentFile = null;
+  for (const line of raw.split(/\r?\n/)) {
+    if (line.startsWith("+++ b/")) {
+      currentFile = line.slice(6).trim();
+      continue;
+    }
+    if (!currentFile || !line.startsWith("+") || line.startsWith("+++")) continue;
+    const code = line.slice(1).trim();
+    const match =
+      code.match(/^export\s+(?:async\s+)?(?:function|const|class|interface|type)\s+([A-Za-z0-9_]+)/) ||
+      code.match(/^(?:async\s+)?function\s+([A-Za-z0-9_]+)\s*\(/) ||
+      code.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:INDEX|FUNCTION|TABLE)\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z0-9_."]+)/i);
+    if (match?.[1]) {
+      const set = map.get(currentFile) ?? new Set();
+      set.add(match[1]);
+      map.set(currentFile, set);
+    }
+  }
+  return map;
+}
+
 function getDiffStats(base, head, includeWorking) {
   const committed = base ? parseNumstat(runGit(`diff --numstat ${base}...${head}`)) : [];
   if (!includeWorking) return { committed, working: [] };
@@ -300,28 +353,35 @@ function formatCommitLog(commits) {
     .join("\n");
 }
 
-function formatAreaBreakdown(files) {
+function formatAreaBreakdown(files, statusMap = new Map(), symbolMap = new Map()) {
   if (files.length === 0) return "_No file differences detected._";
   const grouped = groupByArea(files);
   return grouped
     .map(([area, items]) => {
       const t = summarizeTotals(items);
-      const fileList = items
-        .slice(0, 8)
-        .map((f) =>
-          f.untracked
-            ? `  - \`${f.file}\` _(new file)_`
-            : `  - \`${f.file}\` (+${f.added} / -${f.removed})`
-        )
+      const sorted = items
+        .slice()
+        .sort((a, b) => b.added + b.removed - (a.added + a.removed));
+      const fileList = sorted
+        .slice(0, 12)
+        .map((f) => {
+          const status = f.untracked ? "Added" : (statusMap.get(f.file) ?? "Updated");
+          const syms = Array.from(symbolMap.get(f.file) ?? []).slice(0, 5);
+          const symNote =
+            syms.length > 0 ? ` — _symbols: ${syms.map((s) => `\`${s}\``).join(", ")}_` : "";
+          return f.untracked
+            ? `  - **${status}** \`${f.file}\`${symNote}`
+            : `  - **${status}** \`${f.file}\` (+${f.added} / -${f.removed})${symNote}`;
+        })
         .join("\n");
       const extra =
-        items.length > 8 ? `\n  - _...and ${items.length - 8} more files_` : "";
+        sorted.length > 12 ? `\n  - _...and ${sorted.length - 12} more files_` : "";
       return `#### ${area} (${t.fileCount} ${t.fileCount === 1 ? "file" : "files"}, +${t.added} / -${t.removed})\n${fileList}${extra}`;
     })
     .join("\n\n");
 }
 
-function renderMarkdown(opts, range, commits, diffStats) {
+function renderMarkdown(opts, range, commits, diffStats, statusMap, symbolMap) {
   const today = opts.version || new Date().toISOString().slice(0, 10);
   const allFiles =
     opts.mode === "diff"
@@ -339,8 +399,8 @@ function renderMarkdown(opts, range, commits, diffStats) {
       "### Main Changes (Highlights)",
       ...highlights,
       "",
-      "### Areas Updated",
-      formatAreaBreakdown(allFiles),
+      "### Detailed Changes by Area",
+      formatAreaBreakdown(allFiles, statusMap, symbolMap),
       "",
       "<details>",
       `<summary>Full Commit Log (${commits.length} ${commits.length === 1 ? "commit" : "commits"})</summary>`,
@@ -362,8 +422,8 @@ function renderMarkdown(opts, range, commits, diffStats) {
       "### Key Highlights",
       ...highlights,
       "",
-      "### Changes by Area",
-      formatAreaBreakdown(allFiles),
+      "### Detailed Changes by Area",
+      formatAreaBreakdown(allFiles, statusMap, symbolMap),
       "",
       "### Full Commit Log",
       formatCommitLog(commits),
@@ -382,7 +442,7 @@ function renderMarkdown(opts, range, commits, diffStats) {
     `- **Commits ahead of base:** ${commits.length}`,
     "",
     "## Uncommitted Changes by Area",
-    formatAreaBreakdown(diffStats.working),
+    formatAreaBreakdown(diffStats.working, statusMap, symbolMap),
     "",
     `## Full Commit Log Ahead of \`${range.base ?? "root"}\``,
     formatCommitLog(commits),
@@ -413,7 +473,9 @@ function main() {
   const range = resolveRange(opts.base, opts.head);
   const commits = getCommits(range.base, range.head);
   const diffStats = getDiffStats(range.base, range.head, opts.mode === "diff");
-  const md = renderMarkdown(opts, range, commits, diffStats);
+  const statusMap = getFileStatuses(range.base, range.head);
+  const symbolMap = extractDiffSymbolsByFile(range.base, range.head);
+  const md = renderMarkdown(opts, range, commits, diffStats, statusMap, symbolMap);
 
   if (opts.out) {
     fs.writeFileSync(opts.out, md, "utf8");

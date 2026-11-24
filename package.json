@@ -12,6 +12,7 @@
     "notes:pr": "node scripts/generate-patch-notes.mjs --mode=pr",
     "notes:release": "node scripts/generate-patch-notes.mjs --mode=release",
     "push:dev": "node scripts/auto-push.mjs",
+    "merge:main": "node scripts/merge-to-main.mjs",
     "sync:stuller": "tsx scripts/sync-stuller.ts",
     "sync:quality-gold": "tsx scripts/sync-quality-gold.ts",
     "sync:catalog": "tsx scripts/sync-catalog.ts"

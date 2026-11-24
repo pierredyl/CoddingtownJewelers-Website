@@ -196,7 +196,7 @@ export default async function CategoryPage({
 
           {/* Category Piece Browser */}
           <CatalogBrowser
-            key={activeCategory.slug}
+            key={`${activeCategory.slug}:${initialAudience}:${initialStyle}:${initialStone}`}
             categorySlug={activeCategory.slug}
             categoryName={activeCategory.name}
             initialAudience={initialAudience}

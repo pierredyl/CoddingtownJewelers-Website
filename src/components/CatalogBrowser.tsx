@@ -266,10 +266,12 @@ function buildFiltersFromSearch(
   return next;
 }
 
+const EMPTY_CATEGORIES: CategorySummary[] = [];
+
 export function CatalogBrowser({
   categorySlug,
   categoryName,
-  availableCategories = [],
+  availableCategories = EMPTY_CATEGORIES,
   initialQuery = "",
   initialAudience = "",
   initialStyle = "",
@@ -350,16 +352,17 @@ export function CatalogBrowser({
   const [retryNonce, setRetryNonce] = useState(0);
   const loadMoreControllerRef = useRef<AbortController | null>(null);
   const sessionSeedRef = useRef<number>(0);
+  const prevRouteKeyRef = useRef<string>(`${categorySlug}|${initialFiltersKey}`);
 
-  // Per-session seeded shuffle on mount (zero SSR hydration mismatch, zero DB cost)
+  // Initialize deterministic per-session shuffle seed once on mount
   useEffect(() => {
     const seed = getSessionShuffleSeed();
     sessionSeedRef.current = seed;
-    if (!initialQuery.trim() && !filters.query.trim()) {
+    if (!initialQuery.trim()) {
       setGroups(seededShuffle(initialGroups, seed));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categorySlug, initialGroups, initialQuery]);
+  }, []);
 
   // Lock body scroll & support Escape key when mobile filter drawer is open
   useEffect(() => {
@@ -393,10 +396,21 @@ export function CatalogBrowser({
     [categorySlug]
   );
 
+  const routeKey = `${categorySlug}|${initialFiltersKey}`;
+
   useEffect(() => {
+    if (prevRouteKeyRef.current === routeKey) {
+      return;
+    }
+    prevRouteKeyRef.current = routeKey;
+    const seed = sessionSeedRef.current;
     setFilters(initialFilters);
     setSearchInputValue(initialQuery);
-    setGroups(initialGroups);
+    setGroups(
+      !initialQuery.trim() && seed > 0
+        ? seededShuffle(initialGroups, seed)
+        : initialGroups
+    );
     setTotalSkus(initialTotalSkus);
     setHasMore(initialHasMore);
     setNextOffset(initialNextOffset);
@@ -407,22 +421,8 @@ export function CatalogBrowser({
     setLengthOptions(initialLengthOptions);
     setClosureOptions(initialClosureOptions);
     setRingSizeOptions(initialRingSizeOptions);
-  }, [
-    categorySlug,
-    initialFilters,
-    initialQuery,
-    initialGroups,
-    initialTotalSkus,
-    initialHasMore,
-    initialNextOffset,
-    initialMetalOptions,
-    initialStoneOptions,
-    initialHasNoStoneItems,
-    initialHasSizableItems,
-    initialLengthOptions,
-    initialClosureOptions,
-    initialRingSizeOptions,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeKey]);
 
   const filterKey = JSON.stringify(filters);
   const hasNonInitialFilters = filterKey !== initialFiltersKey;
@@ -607,7 +607,7 @@ export function CatalogBrowser({
       let currentTotalSkus = totalSkus;
       let newCardsAdded = 0;
 
-      const MAX_BATCHES_PER_CLICK = 4;
+      const MAX_BATCHES_PER_CLICK = 6;
       const MIN_NEW_CARDS = 6;
 
       for (let attempt = 0; attempt < MAX_BATCHES_PER_CLICK; attempt++) {
@@ -616,7 +616,10 @@ export function CatalogBrowser({
         const res = await fetch(`/api/catalog/category?${qs.toString()}`, {
           signal: controller.signal,
         });
-        if (!res.ok) break;
+        if (!res.ok) {
+          setFilterError(true);
+          break;
+        }
         const page = (await res.json()) as {
           groups: CatalogItemGroup[];
           totalSkus: number;
@@ -637,7 +640,10 @@ export function CatalogBrowser({
             : page.groups;
         currentGroups = mergeGroups(currentGroups, incomingGroups);
         newCardsAdded += currentGroups.length - beforeCount;
-        currentTotalSkus = page.totalSkus;
+        currentTotalSkus =
+          categorySlug === "all" && !hasActiveFilters
+            ? Math.max(currentTotalSkus, page.totalSkus)
+            : page.totalSkus;
         currentHasMore = page.hasMore;
         currentOffset = page.nextOffset;
 

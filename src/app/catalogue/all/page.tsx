@@ -164,7 +164,7 @@ export default async function AllCatalogPage({
 
           {/* Unified Universal Catalogue Browser with Full Progressive Filter Sidebar */}
           <CatalogBrowser
-            key="all"
+            key={`all:${initialQuery}`}
             categorySlug="all"
             categoryName="All Jewelry"
             availableCategories={categories}

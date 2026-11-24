@@ -20,11 +20,12 @@ const dryRun = args.includes("--dry-run");
 const noPush = args.includes("--no-push");
 const allowMain = args.includes("--allow-main");
 
-function runGit(cmd) {
-  return execSync(`git ${cmd}`, {
+function runGit(cmd, trimStart = true) {
+  const out = execSync(`git ${cmd}`, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
+  });
+  return trimStart ? out.trim() : out.trimEnd();
 }
 
 function classifyArea(filePath) {
@@ -76,11 +77,12 @@ function classifyArea(filePath) {
 }
 
 function getStatusEntries() {
-  const raw = runGit("status --porcelain");
-  if (!raw) return [];
+  // Pass trimStart=false so leading status spaces (e.g. " M package.json") are preserved!
+  const raw = runGit("status --porcelain -uall", false);
+  if (!raw.trim()) return [];
   return raw
     .split(/\r?\n/)
-    .filter(Boolean)
+    .filter((line) => line.length > 3)
     .map((line) => {
       const code = line.slice(0, 2);
       const file = line.slice(3).trim().replace(/^"(.*)"$/, "$1");
@@ -127,24 +129,18 @@ function buildAutoCommitMessage(entries, lineCounts) {
     (a, b) => b[1].length - a[1].length
   );
 
-  // Build concise, informative subject line
-  const topAreas = sortedAreas
-    .slice(0, 2)
-    .map(([area]) => area)
-    .join(" & ");
+  // Build concise, readable subject line without mid-word truncation
+  const primaryArea = sortedAreas[0]?.[0] ?? "Core";
   const hasNew = entries.some((e) => e.action === "Added");
   const hasMod = entries.some((e) => e.action === "Updated");
   const verb = hasNew && !hasMod ? "feat" : "update";
-  const topFiles = entries
-    .slice(0, 3)
-    .map((e) => path.basename(e.file))
-    .join(", ");
-  const moreSuffix = entries.length > 3 ? ` (+${entries.length - 3} more)` : "";
-
-  const subject = `${verb}(${topAreas.toLowerCase()}): ${topFiles}${moreSuffix}`.slice(
-    0,
-    72
-  );
+  const scope = primaryArea.toLowerCase().replace(/\s*&\s*/g, "/");
+  const firstFile = path.basename(entries[0].file);
+  const summaryPart =
+    entries.length === 1
+      ? firstFile
+      : `${firstFile} and ${entries.length - 1} other ${entries.length - 1 === 1 ? "file" : "files"}`;
+  const subject = `${verb}(${scope}): ${summaryPart}`;
 
   let totalAdded = 0;
   let totalRemoved = 0;

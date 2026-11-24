@@ -2,18 +2,28 @@
 /**
  * One-Command Auto-Commit & Push for `dev`
  *
- * Automatically inspects all changed/new/deleted files, generates a clean
- * commit subject + full grouped commit log body, commits everything, and
- * pushes to `origin <current-branch>` (blocks direct pushes to `main` by default).
+ * Automatically inspects all changed/new/deleted files AND their diffs,
+ * writes a thorough commit message explaining:
+ *   - What changed
+ *   - Why it was changed
+ *   - What was fixed
+ *   - What was accomplished
+ * Then commits everything and pushes straight to `origin dev`.
  *
  * Usage:
- *   npm run push:dev                  # auto-commit all changes & push to origin dev
- *   npm run push:dev -- --dry-run     # preview the auto-generated commit message without committing
- *   npm run push:dev -- --no-push     # auto-commit locally without pushing
+ *   npm run push:dev                          # auto-commit all changes & push to origin dev
+ *   node scripts/auto-push.mjs --dry-run      # preview the auto-generated commit without committing
+ *   node scripts/auto-push.mjs --no-push      # auto-commit locally without pushing
  */
 
 import { execSync, spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
+import {
+  analyzeDiffDeterministically,
+  classifyArea,
+  maybeEnhanceWithGemini,
+} from "./lib/diff-analyzer.mjs";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
@@ -21,63 +31,18 @@ const noPush = args.includes("--no-push");
 const allowMain = args.includes("--allow-main");
 
 function runGit(cmd, trimStart = true) {
-  const out = execSync(`git ${cmd}`, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  return trimStart ? out.trim() : out.trimEnd();
-}
-
-function classifyArea(filePath) {
-  const p = filePath.replace(/\\/g, "/");
-  if (
-    p.includes("src/lib/search/") ||
-    p.includes("GlobalSearchBar") ||
-    p.includes("api/catalog/search")
-  ) {
-    return "Search";
+  try {
+    const out = execSync(`git ${cmd}`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return trimStart ? out.trim() : out.trimEnd();
+  } catch {
+    return "";
   }
-  if (
-    p.includes("CatalogBrowser") ||
-    p.includes("CatalogFilterSidebar") ||
-    p.includes("CatalogCard") ||
-    p.includes("PieceDetailModal") ||
-    p.includes("catalogFilters") ||
-    p.includes("src/app/catalogue/") ||
-    p.includes("src/app/api/catalog/")
-  ) {
-    return "Catalogue & Filters";
-  }
-  if (
-    p.includes("HomeShowcase") ||
-    p.includes("CatalogLanding") ||
-    p.includes("JewelryGuide") ||
-    p.includes("SiteHeader") ||
-    p.includes("SiteFooter") ||
-    p.includes("globals.css") ||
-    p.includes("public/images/") ||
-    p.includes("src/config/siteImages") ||
-    p.includes("src/config/reviews") ||
-    p.includes("src/config/faq")
-  ) {
-    return "Design & Media";
-  }
-  if (
-    p.includes("supabase/") ||
-    p.includes("src/lib/supabase/") ||
-    p.includes("src/lib/suppliers/") ||
-    p.includes("scripts/sync-")
-  ) {
-    return "Database & Sync";
-  }
-  if (p.includes(".github/") || p.includes("scripts/") || p === "package.json") {
-    return "Automation & Tooling";
-  }
-  return "Core";
 }
 
 function getStatusEntries() {
-  // Pass trimStart=false so leading status spaces (e.g. " M package.json") are preserved!
   const raw = runGit("status --porcelain -uall", false);
   if (!raw.trim()) return [];
   return raw
@@ -96,10 +61,7 @@ function getStatusEntries() {
 
 function getDiffLineCounts() {
   const map = new Map();
-  const raw = [
-    runGit("diff --numstat"),
-    runGit("diff --cached --numstat"),
-  ]
+  const raw = [runGit("diff --numstat"), runGit("diff --cached --numstat")]
     .filter(Boolean)
     .join("\n");
   for (const line of raw.split(/\r?\n/)) {
@@ -118,7 +80,27 @@ function getDiffLineCounts() {
   return map;
 }
 
-function buildAutoCommitMessage(entries, lineCounts) {
+function getWorkingDiffText(entries) {
+  const parts = [runGit("diff -U1"), runGit("diff --cached -U1")].filter(Boolean);
+  for (const e of entries) {
+    if (e.action === "Added" && /\.(m?js|ts|tsx|yml|yaml|sql|md|json)$/i.test(e.file)) {
+      try {
+        const content = fs.readFileSync(path.resolve(process.cwd(), e.file), "utf8");
+        const lines = content
+          .split(/\r?\n/)
+          .slice(0, 120)
+          .map((l) => `+${l}`)
+          .join("\n");
+        parts.push(`+++ b/${e.file}\n${lines}`);
+      } catch {
+        // ignore binary/unreadable
+      }
+    }
+  }
+  return parts.join("\n");
+}
+
+async function buildAutoCommitMessage(entries, lineCounts) {
   const byArea = new Map();
   for (const entry of entries) {
     const list = byArea.get(entry.area) ?? [];
@@ -129,18 +111,33 @@ function buildAutoCommitMessage(entries, lineCounts) {
     (a, b) => b[1].length - a[1].length
   );
 
-  // Build concise, readable subject line without mid-word truncation
+  const rawDiff = getWorkingDiffText(entries);
+  const det = analyzeDiffDeterministically(entries, rawDiff);
+
   const primaryArea = sortedAreas[0]?.[0] ?? "Core";
   const hasNew = entries.some((e) => e.action === "Added");
-  const hasMod = entries.some((e) => e.action === "Updated");
-  const verb = hasNew && !hasMod ? "feat" : "update";
-  const scope = primaryArea.toLowerCase().replace(/\s*&\s*/g, "/");
+  const hasFixes = det.fixed.length > 0;
+  const verb = hasFixes ? "fix" : hasNew ? "feat" : "update";
+  const scope = primaryArea.toLowerCase().replace(/\s*&\s*/g, "/").replace(/,\s*/g, "/");
   const firstFile = path.basename(entries[0].file);
   const summaryPart =
     entries.length === 1
       ? firstFile
       : `${firstFile} and ${entries.length - 1} other ${entries.length - 1 === 1 ? "file" : "files"}`;
-  const subject = `${verb}(${scope}): ${summaryPart}`;
+  const defaultSubject = `${verb}(${scope}): ${summaryPart}`.slice(0, 72);
+
+  const contextSummary = [
+    `Files (${entries.length}):`,
+    ...entries.map((e) => `- ${e.action} ${e.file}`),
+    "",
+    "Diff excerpt:",
+    rawDiff.slice(0, 9000),
+  ].join("\n");
+
+  const narrative = await maybeEnhanceWithGemini(contextSummary, {
+    subject: defaultSubject,
+    ...det,
+  });
 
   let totalAdded = 0;
   let totalRemoved = 0;
@@ -149,11 +146,26 @@ function buildAutoCommitMessage(entries, lineCounts) {
     totalRemoved += stats.removed;
   }
 
-  const bodyLines = [
-    `Auto-generated patch notes (${entries.length} ${entries.length === 1 ? "file" : "files"}, +${totalAdded} / -${totalRemoved}):`,
-    "",
-  ];
+  const bodyLines = [];
+  if (narrative.why.length > 0) {
+    bodyLines.push("Why:");
+    for (const w of narrative.why) bodyLines.push(`- ${w}`);
+    bodyLines.push("");
+  }
+  if (narrative.fixed.length > 0) {
+    bodyLines.push("What Was Fixed:");
+    for (const f of narrative.fixed) bodyLines.push(`- ${f}`);
+    bodyLines.push("");
+  }
+  if (narrative.accomplished.length > 0) {
+    bodyLines.push("What Was Accomplished:");
+    for (const a of narrative.accomplished) bodyLines.push(`- ${a}`);
+    bodyLines.push("");
+  }
 
+  bodyLines.push(
+    `Files Changed (${entries.length} ${entries.length === 1 ? "file" : "files"}, +${totalAdded} / -${totalRemoved}):`
+  );
   for (const [area, items] of sortedAreas) {
     bodyLines.push(`[${area}]`);
     for (const item of items) {
@@ -169,14 +181,14 @@ function buildAutoCommitMessage(entries, lineCounts) {
     bodyLines.push("");
   }
 
-  return { subject, body: bodyLines.join("\n").trim() };
+  return { subject: narrative.subject, body: bodyLines.join("\n").trim() };
 }
 
-function main() {
+async function main() {
   const branch = runGit("rev-parse --abbrev-ref HEAD");
   if (branch === "main" && !allowMain) {
     console.error(
-      "Refusing to auto-push directly to `main`. Switch to `dev` (`git checkout dev`) and merge `dev` into `main` on GitHub so release notes run cleanly."
+      "Refusing to auto-push directly to `main`. Switch to `dev` (`git checkout dev`) and run `npm run merge:main` when ready to release."
     );
     process.exit(1);
   }
@@ -195,7 +207,7 @@ function main() {
   }
 
   const lineCounts = getDiffLineCounts();
-  const { subject, body } = buildAutoCommitMessage(entries, lineCounts);
+  const { subject, body } = await buildAutoCommitMessage(entries, lineCounts);
 
   console.log("=== Auto-Generated Commit ===");
   console.log(subject);
@@ -224,4 +236,7 @@ function main() {
   }
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

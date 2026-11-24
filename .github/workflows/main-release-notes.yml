@@ -27,6 +27,8 @@ jobs:
 
       - name: Generate main release highlights & update CHANGELOG.md
         id: notes
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           BASE_SHA="${{ github.event.before }}"
           if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
